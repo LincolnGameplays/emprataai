@@ -17,12 +17,6 @@ export default function PaywallModal({ isOpen, onClose }: PaywallModalProps) {
    * @param planType - 'starter' or 'pro'
    */
   const handleCheckout = (planType: 'starter' | 'pro') => {
-    // Ensure user is authenticated
-    if (!userId) {
-      navigate('/auth');
-      return;
-    }
-    
     // Define checkout URLs
     let checkoutUrl: string;
     
@@ -32,8 +26,10 @@ export default function PaywallModal({ isOpen, onClose }: PaywallModalProps) {
       checkoutUrl = 'https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939';
     }
     
-    // Append external_id for webhook automation
-    const finalUrl = `${checkoutUrl}?external_id=${userId}`;
+    // Conditional URL logic: append external_id only if user is logged in
+    const finalUrl = userId 
+      ? `${checkoutUrl}?external_id=${userId}` 
+      : checkoutUrl;
     
     // Open checkout in new tab
     window.open(finalUrl, '_blank');

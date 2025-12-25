@@ -103,19 +103,78 @@ export const kirvanoWebhook = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  // 5. EXTRACT USER ID
-  const userId = payload.externalId;
+  // 5. INTELLIGENT USER RESOLUTION (3-Tier Fallback)
+  let userId: string;
+  const externalId = payload.externalId;
+  const customerEmail = payload.customerEmail;
 
-  if (!userId) {
-    console.error("❌ CRITICAL: No external_id (user UID) in payload!");
+  console.log(`🔍 User Resolution - external_id: ${externalId || 'NONE'}, email: ${customerEmail || 'NONE'}`);
+
+  try {
+    // TIER 1: Use external_id if provided (logged-in user flow)
+    if (externalId) {
+      console.log(`✅ TIER 1: Using external_id: ${externalId}`);
+      userId = externalId;
+    } 
+    // TIER 2: Lookup user by email (guest checkout with existing account)
+    else if (customerEmail) {
+      console.log(`🔍 TIER 2: Attempting email lookup for: ${customerEmail}`);
+      
+      try {
+        const userRecord = await admin.auth().getUserByEmail(customerEmail);
+        userId = userRecord.uid;
+        console.log(`✅ TIER 2: Found existing user by email: ${userId}`);
+      } catch (emailError: any) {
+        // TIER 3: Create new user (first-time buyer, no account)
+        if (emailError.code === 'auth/user-not-found') {
+          console.log(`🆕 TIER 3: User not found, creating new account for: ${customerEmail}`);
+          
+          const newUser = await admin.auth().createUser({
+            email: customerEmail,
+            emailVerified: true,
+          });
+          
+          userId = newUser.uid;
+          console.log(`✅ TIER 3: Auto-created user: ${userId}`);
+          
+          // Initialize user document in Firestore
+          await db.collection("users").doc(userId).set({
+            email: customerEmail,
+            credits: 0,
+            plan: "FREE",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            autoCreated: true,
+          });
+          
+        } else {
+          throw emailError; // Re-throw unexpected errors
+        }
+      }
+    } 
+    // FAILURE: No identifier available
+    else {
+      console.error("❌ CRITICAL: No external_id OR customer email in payload!");
+      
+      await db.collection("failed_webhooks").add({
+        error: "Missing both external_id and customer email",
+        payload: rawPayload,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      res.status(200).send({ success: false, error: "No user identifier provided" });
+      return;
+    }
+
+  } catch (error) {
+    console.error("❌ Error during user resolution:", error);
     
     await db.collection("failed_webhooks").add({
-      error: "Missing external_id",
+      error: `User resolution failed: ${String(error)}`,
       payload: rawPayload,
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    res.status(200).send({ success: false, error: "No user ID provided" });
+    res.status(200).send({ success: false, error: "User resolution failed" });
     return;
   }
 
@@ -180,18 +239,16 @@ export const kirvanoWebhook = functions.https.onRequest(async (req, res) => {
     const userRef = db.collection("users").doc(userId);
     const userDoc = await userRef.get();
 
+    // If user document doesn't exist, create it (edge case for auto-created users)
     if (!userDoc.exists) {
-      console.error(`❌ User not found: ${userId}`);
-      
-      await db.collection("failed_webhooks").add({
-        userId,
-        error: "User not found in Firestore",
-        payload: rawPayload,
-        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      console.log(`📝 Creating Firestore document for user: ${userId}`);
+      await userRef.set({
+        email: customerEmail || "unknown@emprata.ai",
+        credits: 0,
+        plan: "FREE",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        autoCreated: !externalId, // Flag if created via email fallback
       });
-
-      res.status(200).send({ success: false, error: "User not found" });
-      return;
     }
 
     // CORREÇÃO DO ERRO TS2314: Usando 'any' ou 'Record<string, any>'
