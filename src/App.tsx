@@ -12,6 +12,9 @@ import LoginPage from './pages/LoginPage';
 import AppStudio from './pages/AppStudio';
 import ProfilePage from './pages/ProfilePage';
 import SuccessPage from './pages/SuccessPage';
+import PrivacyPage from './pages/PrivacyPage';
+import TermsPage from './pages/TermsPage';
+import NotFoundPage from './pages/NotFoundPage';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -37,6 +40,8 @@ export default function App() {
           {/* Public Routes */}
           <Route path="/" element={<LandingPage />} />
           <Route path="/auth" element={<LoginPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
           
           {/* Protected Routes */}
           <Route 
@@ -64,8 +69,8 @@ export default function App() {
             } 
           />
           
-          {/* Fallback: 404 redirect to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Fallback: 404 Not Found */}
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </div>
     </Router>

@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Zap, CheckCircle2, Star, Sparkles, Crown } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface PaywallModalProps {
   isOpen: boolean;
@@ -10,19 +10,33 @@ interface PaywallModalProps {
 
 export default function PaywallModal({ isOpen, onClose }: PaywallModalProps) {
   const userId = useAppStore((state) => state.userId);
+  const navigate = useNavigate();
   
-  // Kirvano checkout URLs with dynamic user ID
-  // STARTER: R$ 97,00 - 15 Créditos
-  const starterCheckoutUrl = `https://pay.kirvano.com/30cef9d1-c08e-49ed-b361-2862f182485f?external_id=${userId}`;
-  // PRO: R$ 197,00 - 50 Créditos
-  const proCheckoutUrl = `https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939?external_id=${userId}`;
-  
-  const handleStarterPurchase = () => {
-    window.open(starterCheckoutUrl, '_blank');
-  };
-  
-  const handleProPurchase = () => {
-    window.open(proCheckoutUrl, '_blank');
+  /**
+   * Handle checkout process
+   * @param planType - 'starter' or 'pro'
+   */
+  const handleCheckout = (planType: 'starter' | 'pro') => {
+    // Ensure user is authenticated
+    if (!userId) {
+      navigate('/auth');
+      return;
+    }
+    
+    // Define checkout URLs
+    let checkoutUrl: string;
+    
+    if (planType === 'starter') {
+      checkoutUrl = 'https://pay.kirvano.com/30cef9d1-c08e-49ed-b361-2862f182485f';
+    } else {
+      checkoutUrl = 'https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939';
+    }
+    
+    // Append external_id for webhook automation
+    const finalUrl = `${checkoutUrl}?external_id=${userId}`;
+    
+    // Open checkout in new tab
+    window.open(finalUrl, '_blank');
   };
   
   return (
@@ -154,7 +168,7 @@ export default function PaywallModal({ isOpen, onClose }: PaywallModalProps) {
                   </ul>
                   
                   <button 
-                    onClick={handleStarterPurchase}
+                    onClick={() => handleCheckout('starter')}
                     className="w-full py-5 rounded-2xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto"
                   >
                     Comprar Pack
@@ -217,7 +231,7 @@ export default function PaywallModal({ isOpen, onClose }: PaywallModalProps) {
                   </ul>
                   
                   <button 
-                    onClick={handleProPurchase}
+                    onClick={() => handleCheckout('pro')}
                     className="w-full py-5 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto relative z-10"
                   >
                     <Star className="w-5 h-5 inline-block mr-2 fill-current" />
