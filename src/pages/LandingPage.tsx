@@ -5,10 +5,29 @@ import {
   Zap, ArrowRight, ShieldCheck, Clock, DollarSign, HelpCircle 
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 
 const BRANDS = ['SUCULÊNCIA', 'VENDAS', 'DELIVERY', 'APPS', 'LUCRO', 'PROFISSIONAL', 'DESEJO'];
 
 const LandingPage = () => {
+  const { user } = useAuth();
+
+  /**
+   * Handle checkout process - HARDCODED KIRVANO LINKS
+   * Works for both logged-in and anonymous users
+   * @param plan - 'starter' or 'pro'
+   */
+  const handleCheckout = (plan: 'starter' | 'pro') => {
+    const links = {
+      starter: "https://pay.kirvano.com/30cef9d1-c08e-49ed-b361-2862f182485f",
+      pro: "https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939"
+    };
+    const url = links[plan];
+    // Se tiver user, manda ID. Se não, manda limpo (Webhook resolve por email).
+    const finalLink = user ? `${url}?external_id=${user.uid}` : url;
+    window.open(finalLink, '_blank');
+  };
+
   return (
     <div className="flex flex-col bg-[#0a0a0a] text-white selection:bg-primary/30">
       
@@ -374,16 +393,12 @@ const LandingPage = () => {
                   </li>
                </ul>
                
-               <a 
-                  href={`https://pay.kirvano.com/d5fb1f37-7512-492d-bb6f-b89840bdadc4?external_id=${localStorage.getItem('emprata_user_id') || 'guest'}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-auto"
+               <button 
+                 onClick={() => handleCheckout('starter')}
+                 className="w-full py-6 rounded-3xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-lg transition-all hover:scale-[1.02] active:scale-95 mt-auto"
                >
-                  <button className="w-full py-6 rounded-3xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-lg transition-all hover:scale-[1.02] active:scale-95">
-                     Comprar Pack
-                  </button>
-               </a>
+                  Comprar Pack
+               </button>
             </div>
 
             {/* TIER 3: PRO - Franquia */}
@@ -440,8 +455,8 @@ const LandingPage = () => {
                </ul>
                
                <button 
-                  onClick={() => alert('Link do PRO será configurado em breve! Por enquanto, use o Pack Delivery.')}
-                  className="w-full py-6 rounded-3xl bg-neon-orange font-black text-white shadow-xl shadow-primary/30 uppercase tracking-tighter text-lg hover:scale-[1.02] transition-all active:scale-95 mt-auto"
+                 onClick={() => handleCheckout('pro')}
+                 className="w-full py-6 rounded-3xl bg-neon-orange font-black text-white shadow-xl shadow-primary/30 uppercase tracking-tighter text-lg hover:scale-[1.02] transition-all active:scale-95 mt-auto"
                >
                   Quero Lucro Máximo
                </button>
