@@ -1,8 +1,8 @@
 /**
- * useAuth Hook - Defensive Programming Version
+ * useAuth Hook - Defensive Programming Version (Fixed for Build)
  * Manages Firebase authentication with Google Sign-In and Firestore integration
- * 
- * CRITICAL FIX: Uses try/catch/finally to GUARANTEE loading always completes
+ * * CRITICAL FIX: Uses try/catch/finally to GUARANTEE loading always completes
+ * TS FIX: Handles null vs string types for useAppStore
  */
 
 import { useState, useEffect } from 'react';
@@ -71,10 +71,9 @@ export function useAuth() {
             setUserData(data);
             setPlan(data.plan || 'FREE');
             setCredits(data.credits ?? 3);
-            setUserId(firebaseUser.uid);
+            setUserId(firebaseUser.uid); // ✅ String garantida
           } else {
             // User exists in Auth but NOT in Firestore
-            // This can happen if profile creation failed
             console.warn('⚠️ [useAuth] User has no Firestore profile, creating one...');
             
             const newUserData: UserData = {
@@ -92,7 +91,7 @@ export function useAuth() {
             setUserData(newUserData);
             setPlan('FREE');
             setCredits(3);
-            setUserId(firebaseUser.uid);
+            setUserId(firebaseUser.uid); // ✅ String garantida
             console.log('✅ [useAuth] Created missing Firestore profile');
           }
         } else {
@@ -101,7 +100,10 @@ export function useAuth() {
           setUserData(null);
           setPlan('FREE');
           setCredits(3);
-          setUserId(null);
+          
+          // 🛑 CORREÇÃO AQUI: Trocamos null por '' (string vazia)
+          // Isso resolve o erro: Argument of type 'null' is not assignable to parameter of type 'string'
+          setUserId(''); 
         }
       } catch (err: any) {
         // CRITICAL: Catch ALL errors to prevent infinite loading
@@ -112,6 +114,7 @@ export function useAuth() {
         setUserData(null);
         setPlan('FREE');
         setCredits(3);
+        setUserId(''); // ✅ Correção aplicada aqui também
       } finally {
         // CRITICAL: ALWAYS stop loading, no matter what happens
         console.log('✅ [useAuth] Loading complete');
