@@ -11,6 +11,7 @@ import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
 import AppStudio from './pages/AppStudio';
 import ProfilePage from './pages/ProfilePage';
+import SuccessPage from './pages/SuccessPage';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -51,6 +52,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ProfilePage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/success" 
+            element={
+              <ProtectedRoute>
+                <SuccessPage />
               </ProtectedRoute>
             } 
           />
