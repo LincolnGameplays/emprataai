@@ -117,11 +117,11 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                 {/* TIER 2: STARTER */}
                 <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-2 border-blue-500/30 rounded-3xl p-8 flex flex-col relative">
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-4 py-1 rounded-full font-black text-[10px] tracking-widest uppercase">
-                    Ideal Cardápios Pequenos
+                    🔥 Faça o Cardápio Inteiro
                   </div>
                   
                   <div className="mb-6 mt-2">
-                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Pagamento Único</span>
+                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Assinatura Mensal</span>
                     <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Pack Delivery</h3>
                   </div>
                   
@@ -130,14 +130,14 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                       <span className="text-5xl font-black tracking-tight italic">R$ 97</span>
                       <span className="text-lg font-bold text-white/40">/mês</span>
                     </div>
-                    <p className="text-sm font-bold text-blue-400">15 Créditos Mensais</p>
-                    <p className="text-xs font-black text-white/30 mt-1">(Acumulativos) • R$ 6,40/foto</p>
+                    <p className="text-sm font-bold text-blue-400">50 Créditos Mensais</p>
+                    <p className="text-xs font-black text-white/30 mt-1">(Acumulativos) • R$ 1,94/foto 🔥</p>
                   </div>
                   
                   <ul className="space-y-2 mb-8 flex-grow text-sm font-medium">
                     <li className="flex gap-2 items-start">
                       <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
-                      <span className="text-white font-bold">15 Créditos</span>
+                      <span className="text-white font-bold">50 Créditos/mês</span>
                     </li>
                     <li className="flex gap-2 items-start">
                       <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
@@ -168,7 +168,7 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                 {/* TIER 3: PRO */}
                 <div className="bg-gradient-to-br from-primary/20 to-orange-600/10 border-2 border-primary rounded-3xl p-8 flex flex-col relative overflow-hidden transform scale-105">
                   <div className="absolute top-0 right-0 bg-primary text-white px-6 py-2 rounded-bl-3xl font-black text-[10px] tracking-widest uppercase italic">
-                    MAIS VENDIDO
+                    MAIS VENDIDO 🚀
                   </div>
                   
                   <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
@@ -183,20 +183,20 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                       <span className="text-5xl font-black tracking-tight italic">R$ 197</span>
                       <span className="text-lg font-bold text-white/40">/mês</span>
                     </div>
-                    <p className="text-sm font-bold text-primary">50 Créditos Mensais + Vibes PRO</p>
-                    <p className="text-xs font-black text-white/30 mt-1">(Acumulativos) • R$ 3,90/foto 🔥</p>
+                    <p className="text-sm font-bold text-primary">200 Créditos Mensais + Vibes PRO</p>
+                    <p className="text-xs font-black text-white/30 mt-1">Menos de R$ 1,00/foto (R$ 0,98) 🚀</p>
                   </div>
                   
                   <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 mb-6 relative z-10">
                     <p className="text-xs font-black text-primary uppercase tracking-wide text-center">
-                      💡 Recomendado para Dark Kitchens
+                      💡 Ideal para Dark Kitchens e Franquias
                     </p>
                   </div>
                   
                   <ul className="space-y-2 mb-8 flex-grow text-sm font-medium relative z-10">
                     <li className="flex gap-2 items-start">
                       <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      <span className="text-white font-bold">50 Créditos Premium</span>
+                      <span className="text-white font-bold">200 Créditos Premium/mês</span>
                     </li>
                     <li className="flex gap-2 items-start">
                       <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />

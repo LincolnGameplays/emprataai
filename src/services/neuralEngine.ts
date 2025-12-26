@@ -1,20 +1,24 @@
 /**
- * ⚡ EMPRATA NEURAL ENGINE™ v4.1 ⚡
- * Production-Ready AI Service with Atomic Credit Transactions
+ * ⚡ EMPRATA NEURAL ENGINE™ v4.2 ⚡
+ * Production-Ready AI Service with Firestore Credit Persistence
+ * 
+ * Features:
+ * - Atomic credit transactions (UI + Database sync)
+ * - Automatic rollback on failure
+ * - Two-step AI pipeline with next-gen models
  * 
  * Models (LOCKED - DO NOT CHANGE):
- * - Prompt Architect: models/gemini-3-pro-preview
- * - Image Generator: models/gemini-2.5-flash-image
+ * - Architect: models/gemini-3-pro-preview
+ * - Generator: models/gemini-2.5-flash-image
  */
 
-import { useAppStore } from '../store/useAppStore';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { useAppStore } from "../store/useAppStore";
+import { auth, db } from "../config/firebase";
+import { doc, updateDoc, increment } from "firebase/firestore";
 
-// API Configuration
-const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
-
-// Initialize Google Generative AI SDK
-const genAI = new GoogleGenerativeAI(API_KEY || '');
+// Initialize API with environment key
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_API_KEY || "");
 
 // ══════════════════════════════════════════════════════════════════════════════
 // MODEL CONFIGURATION (LOCKED - DO NOT CHANGE THESE NAMES)
@@ -132,32 +136,58 @@ Output: Just the prompt in English. No explanations.`;
 }
 
 /**
- * Main Image Generation Function with Atomic Credit Transactions
+ * Main Image Generation Function
+ * With Firestore Credit Persistence (Atomic Transactions)
  */
 export async function generateFoodImage(
   params: GenerateImageParams
 ): Promise<GenerateImageResponse> {
-  console.log("🚀 [Neural Engine v4.1] Iniciando...");
+  console.log("🚀 [Neural Engine v4.2] Iniciando...");
 
-  // Get store actions
-  const { credits, plan, decrementCredit, refundCredit } = useAppStore.getState();
+  const store = useAppStore.getState();
+  const user = auth.currentUser;
 
   // ════════════════════════════════════════════════════════════════════════════
-  // STEP 1: VALIDATION
+  // STEP 1: SECURITY VALIDATION
   // ════════════════════════════════════════════════════════════════════════════
-  if (!API_KEY) {
+  if (!user) {
+    return { success: false, error: "Usuário não autenticado." };
+  }
+
+  if (!import.meta.env.VITE_GOOGLE_API_KEY) {
     return { success: false, error: "API Key não configurada." };
   }
 
-  if (plan !== 'PRO' && credits < 1) {
+  if (store.plan !== 'PRO' && store.credits < 1) {
     return { success: false, error: "Créditos insuficientes. Faça um upgrade." };
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // STEP 2: OPTIMISTIC DEDUCTION (Cobra ANTES para evitar fraude)
+  // STEP 2: OPTIMISTIC DEDUCTION (UI + Database)
   // ════════════════════════════════════════════════════════════════════════════
-  console.log("💳 Cobrança otimista...");
-  decrementCredit();
+  console.log("💳 Cobrança otimista (UI + Firestore)...");
+  
+  // Update UI immediately
+  store.decrementCredit();
+  
+  // Persist to Firestore
+  const userRef = doc(db, 'users', user.uid);
+  
+  try {
+    await updateDoc(userRef, { 
+      credits: increment(-1) 
+    });
+    console.log("✅ Crédito deduzido no Firestore");
+
+  } catch (dbError) {
+    console.error("❌ Erro ao deduzir crédito no Firestore:", dbError);
+    // Rollback UI if database fails
+    store.refundCredit();
+    return { 
+      success: false, 
+      error: "Erro ao processar pagamento. Tente novamente." 
+    };
+  }
 
   try {
     // ══════════════════════════════════════════════════════════════════════════
@@ -195,7 +225,7 @@ export async function generateFoodImage(
     const generator = genAI.getGenerativeModel({ model: IMAGE_GENERATOR_MODEL });
     const imageResult = await generator.generateContent(enhancedPrompt);
     
-    // Extract image from response (SDK may vary on how images are returned)
+    // Extract image from response
     const response = imageResult.response;
     const parts = response.candidates?.[0]?.content?.parts || [];
     
@@ -229,14 +259,24 @@ export async function generateFoodImage(
 
   } catch (error: any) {
     // ══════════════════════════════════════════════════════════════════════════
-    // STEP 6: ROLLBACK - DEVOLVE O CRÉDITO
+    // STEP 6: ROLLBACK - DEVOLVE O CRÉDITO (UI + Database)
     // ══════════════════════════════════════════════════════════════════════════
     console.error("❌ Erro na geração:", error);
-    console.log("💳 Rollback: Devolvendo crédito...");
+    console.log("💳 Rollback: Devolvendo crédito (UI + Firestore)...");
     
-    refundCredit(); // OBRIGATÓRIO: Devolve o crédito
+    // Rollback UI
+    store.refundCredit();
     
-    console.log("✅ Crédito devolvido com sucesso.");
+    // Rollback Firestore
+    try {
+      await updateDoc(userRef, { 
+        credits: increment(1) 
+      });
+      console.log("✅ Crédito devolvido no Firestore");
+    } catch (refundError) {
+      console.error("❌ Erro crítico ao estornar crédito:", refundError);
+      // Log critical error - manual intervention may be needed
+    }
 
     return {
       success: false,

@@ -353,7 +353,7 @@ const LandingPage = () => {
             {/* TIER 2: STARTER - Pack Delivery */}
             <div className="glass-card p-10 rounded-[3.5rem] border-white/10 flex flex-col relative">
                <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-6 py-2 rounded-full font-black text-xs tracking-widest uppercase">
-                  Ideal para Cardápios Pequenos
+                  🔥 Faça o Cardápio Inteiro
                </div>
                
                <div className="mb-6 mt-4">
@@ -366,14 +366,14 @@ const LandingPage = () => {
                      <span className="text-6xl font-black tracking-tight-titles italic">R$ 97</span>
                      <span className="text-xl font-bold text-white/40">/mês</span>
                   </div>
-                  <p className="text-sm font-bold text-blue-400">15 Créditos Mensais (Acumulativos)</p>
-                  <p className="text-xs font-black text-white/30 mt-1">Sai a R$ 6,40 por foto</p>
+                  <p className="text-sm font-bold text-blue-400">50 Créditos Mensais (Acumulativos)</p>
+                  <p className="text-xs font-black text-white/30 mt-1">Apenas R$ 1,94 por foto 🔥</p>
                </div>
                
                <ul className="space-y-3 mb-10 flex-grow text-sm font-bold">
                   <li className="flex gap-3 items-start">
                      <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
-                     <span className="text-white">15 Créditos</span>
+                     <span className="text-white">50 Créditos/mês</span>
                   </li>
                   <li className="flex gap-3 items-start">
                      <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
@@ -417,20 +417,20 @@ const LandingPage = () => {
                      <span className="text-6xl font-black tracking-tight-titles italic">R$ 197</span>
                      <span className="text-xl font-bold text-white/40">/mês</span>
                   </div>
-                  <p className="text-sm font-bold text-neon-orange">50 Créditos Mensais + Vibes Exclusivas</p>
-                  <p className="text-xs font-black text-white/30 mt-1">Sai a R$ 3,90 por foto 🔥</p>
+                  <p className="text-sm font-bold text-neon-orange">200 Créditos Mensais + Vibes Exclusivas</p>
+                  <p className="text-xs font-black text-white/30 mt-1">Menos de R$ 1,00 por foto (R$ 0,98) 🚀</p>
                </div>
                
                <div className="bg-neon-orange/10 border border-neon-orange/20 rounded-2xl p-4 mb-8">
                   <p className="text-xs font-black text-neon-orange uppercase tracking-wider">
-                     💡 Recomendado para Dark Kitchens
+                     💡 Ideal para Dark Kitchens e Franquias
                   </p>
                </div>
                
                <ul className="space-y-3 mb-10 flex-grow text-sm font-bold">
                   <li className="flex gap-3 items-start">
                      <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     <span className="text-white">50 Créditos Premium</span>
+                     <span className="text-white">200 Créditos Premium/mês</span>
                   </li>
                   <li className="flex gap-3 items-start">
                      <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />

@@ -17,13 +17,13 @@ const db = admin.firestore();
 // ============================================================================
 
 const KIRVANO_OFFER_STARTER = defineString("KIRVANO_OFFER_STARTER", {
-  description: "ID da oferta STARTER na Kirvano (pacote de 15 créditos)",
-  default: "COLE_O_ID_DA_OFERTA_STARTER_AQUI",
+  description: "ID da oferta STARTER na Kirvano (pacote de 50 créditos - R$ 97/mês)",
+  default: "30cef9d1-c08e-49ed-b361-2862f182485f",
 });
 
 const KIRVANO_OFFER_PRO = defineString("KIRVANO_OFFER_PRO", {
-  description: "ID da oferta PRO na Kirvano (assinatura mensal)",  
-  default: "COLE_O_ID_DA_OFERTA_PRO_AQUI",
+  description: "ID da oferta PRO na Kirvano (200 créditos - R$ 197/mês)",  
+  default: "b26facd0-9585-4b17-8b68-d58aaf659939",
 });
 
 const KIRVANO_WEBHOOK_SECRET = defineString("KIRVANO_WEBHOOK_SECRET", {
@@ -204,18 +204,21 @@ export const kirvanoWebhook = functions.https.onRequest(async (req, res) => {
 
   switch (offerId) {
     case offerIds.starter:
-      console.log("🎁 Matched: STARTER offer");
+    case "30cef9d1-c08e-49ed-b361-2862f182485f": // Hardcoded fallback
+      console.log("🎁 Matched: STARTER offer (50 credits)");
       reward = {
-        credits: 15,
+        credits: 50, // UPDATED: Was 15, now 50 for churn reduction
         plan: "starter",
-        isSubscription: false,
+        isSubscription: true,
+        subscriptionDays: 30,
       };
       break;
 
     case offerIds.pro:
-      console.log("🎁 Matched: PRO offer");
+    case "b26facd0-9585-4b17-8b68-d58aaf659939": // Hardcoded fallback
+      console.log("🎁 Matched: PRO offer (200 credits)");
       reward = {
-        credits: 50,
+        credits: 200, // UPDATED: Was 50, now 200 for churn reduction
         plan: "pro",
         isSubscription: true,
         subscriptionDays: 30,
@@ -224,10 +227,10 @@ export const kirvanoWebhook = functions.https.onRequest(async (req, res) => {
 
     default:
       console.warn(`⚠️ Unknown offer ID: ${offerId}`);
-      // Fallback
+      // Fallback - generous default to prevent complaints
       reward = {
-        credits: 10,
-        plan: "free",
+        credits: 50,
+        plan: "starter",
         isSubscription: false,
       };
   }
