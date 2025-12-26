@@ -1,9 +1,9 @@
 /**
- * App.tsx - Main Application Router
- * All routes properly configured including protected routes
+ * Emprata.ai Routes v1.2
+ * Clean routing without admin functionality
  */
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Toaster } from 'sonner';
 
 // Pages
@@ -37,13 +37,17 @@ export default function App() {
       
       <div className="min-h-screen relative overflow-x-hidden">
         <Routes>
-          {/* Public Routes */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* PUBLIC ROUTES */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
           <Route path="/" element={<LandingPage />} />
           <Route path="/auth" element={<LoginPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="/terms" element={<TermsPage />} />
           
-          {/* Protected Routes */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* PROTECTED ROUTES (Requires Authentication) */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
           <Route 
             path="/app" 
             element={
@@ -69,7 +73,9 @@ export default function App() {
             } 
           />
           
-          {/* Fallback: 404 Not Found */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
+          {/* 404 FALLBACK */}
+          {/* ══════════════════════════════════════════════════════════════════ */}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </div>

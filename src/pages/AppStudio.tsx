@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Camera, Download, RefreshCw, Share2, ChevronLeft, Lock, Coins,
-  Plus, Info, X, Zap, Box, MousePointer2, Utensils, Sparkles, Loader2, Shield, Aperture
+  Plus, Info, X, Zap, Box, MousePointer2, Utensils, Sparkles, Loader2, Aperture
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
@@ -10,15 +10,14 @@ import confetti from 'canvas-confetti';
 import { useAppStore, FoodVibe, Perspective } from '../store/useAppStore';
 import { generateFoodImage } from '../services/neuralEngine';
 import PaywallModal from '../components/PaywallModal';
-import { AdminModal } from '../components/AdminModal';
+
 import { AuthModal } from '../components/AuthModal';
 import { UserDropdown } from '../components/UserDropdown';
 import { useAuth } from '../hooks/useAuth';
 import { useImageDownloader } from '../hooks/useImageDownloader';
 import { VIBES } from '../constants/vibes';
 
-// Admin email - set via environment variable
-const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL;
+
 
 // Professional Photography Angles
 const PERSPECTIVES: { id: Perspective; label: string; subLabel: string; icon: any }[] = [
@@ -34,7 +33,7 @@ export default function AppStudio() {
   const { downloadImage, isDownloading, error: downloadError } = useImageDownloader();
   
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
+
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [processingStage, setProcessingStage] = useState<string>('');
@@ -43,8 +42,7 @@ export default function AppStudio() {
   const [isCropping, setIsCropping] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Check if user is admin
-  const isAdmin = user?.email === ADMIN_EMAIL;
+
 
   // --- Client-Side Image Cropping Utility (v4.0) ---
   const cropImageToSquare = async (file: File): Promise<File> => {
@@ -338,19 +336,10 @@ export default function AppStudio() {
     <div className="min-h-[100dvh] w-screen bg-[#0a0a0a] text-white flex flex-col md:flex-row font-sans overflow-hidden">
       
       <PaywallModal isOpen={isPaywallOpen} onClose={() => setIsPaywallOpen(false)} />
-      <AdminModal isOpen={isAdminOpen} onClose={() => setIsAdminOpen(false)} userId={user?.uid || ''} />
+
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
 
-      {/* Admin Button (Floating - Top Left) */}
-      {isAdmin && (
-        <button
-          onClick={() => setIsAdminOpen(true)}
-          className="fixed top-4 left-4 z-[100] w-12 h-12 bg-primary/20 hover:bg-primary/40 border-2 border-primary/50 rounded-full flex items-center justify-center backdrop-blur-xl transition-all hover:scale-110 shadow-lg shadow-primary/20"
-          title="Admin Mode"
-        >
-          <Shield className="w-6 h-6 text-primary" />
-        </button>
-      )}
+
 
       {/* Mobile Header (Floating) */}
       <header className="md:hidden absolute top-0 left-0 right-0 z-50 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm">
@@ -395,7 +384,7 @@ export default function AppStudio() {
         </div>
 
         <div className="flex items-center gap-4">
-          <UserDropdown onOpenAdmin={() => setIsAdminOpen(true)} />
+          <UserDropdown />
           
           <button 
             onClick={handleDownload}

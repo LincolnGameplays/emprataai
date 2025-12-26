@@ -5,21 +5,19 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Shield, LogOut, ChevronDown } from 'lucide-react';
+import { User, LogOut, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
-interface UserDropdownProps {
-  onOpenAdmin?: () => void;
-}
+interface UserDropdownProps {}
 
-export function UserDropdown({ onOpenAdmin }: UserDropdownProps) {
+export function UserDropdown({}: UserDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { user, userData, signOut } = useAuth();
   const navigate = useNavigate();
 
-  const isAdmin = user?.email === import.meta.env.VITE_ADMIN_EMAIL;
+
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -38,10 +36,7 @@ export function UserDropdown({ onOpenAdmin }: UserDropdownProps) {
     setIsOpen(false);
   };
 
-  const handleAdmin = () => {
-    onOpenAdmin?.();
-    setIsOpen(false);
-  };
+
 
   const handleLogout = async () => {
     await signOut();
@@ -107,16 +102,7 @@ export function UserDropdown({ onOpenAdmin }: UserDropdownProps) {
                 <span className="text-sm font-bold text-white">Meu Perfil</span>
               </button>
 
-              {/* Admin (Only for admin users) */}
-              {isAdmin && (
-                <button
-                  onClick={handleAdmin}
-                  className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-colors text-left border-t border-white/5"
-                >
-                  <Shield className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-bold text-primary">Admin Panel</span>
-                </button>
-              )}
+
 
               {/* Logout */}
               <button

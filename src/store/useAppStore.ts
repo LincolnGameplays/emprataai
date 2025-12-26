@@ -1,3 +1,9 @@
+/**
+ * Emprata.ai App Store v1.2
+ * Global state management with Zustand
+ * Includes atomic credit transaction actions
+ */
+
 import { create } from 'zustand';
 
 export type UserPlan = 'FREE' | 'STARTER' | 'PRO';
@@ -30,7 +36,11 @@ interface AppState {
   setLightIntensity: (intensity: number) => void;
   setIsGenerating: (isGenerating: boolean) => void;
   resetEditor: () => void;
+  
+  // Credit Management (Atomic Transactions)
   useCredit: () => boolean;
+  decrementCredit: () => void;  // Use BEFORE API call
+  refundCredit: () => void;     // Use in CATCH block
 }
 
 // Generate or retrieve persistent user ID
@@ -79,6 +89,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     isGenerating: false,
   }),
 
+  // Legacy credit usage (for backward compatibility)
   useCredit: () => {
     const { credits, plan } = get();
     if (plan === 'PRO') return true;
@@ -88,4 +99,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     return false;
   },
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ATOMIC CREDIT TRANSACTION ACTIONS
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Optimistic Deduction - Call BEFORE API request
+   * Immediately deducts credit to prevent double-spending
+   */
+  decrementCredit: () => {
+    const { credits, plan } = get();
+    if (plan !== 'PRO' && credits > 0) {
+      set({ credits: credits - 1 });
+    }
+  },
+
+  /**
+   * Rollback Refund - Call in CATCH block on API failure
+   * Restores the credit when generation fails
+   */
+  refundCredit: () => set((state) => ({ credits: state.credits + 1 })),
 }));
