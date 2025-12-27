@@ -15,6 +15,7 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
    * Handle checkout process - HARDCODED LINKS
    * NO LOGIN REQUIRED - NO ALERTS - DIRECT CHECKOUT
    * Uses onClick ONLY - NO <a> tags
+   * Includes Meta Pixel InitiateCheckout tracking
    * @param planType - 'starter' or 'pro'
    */
   const handleCheckout = (planType: 'starter' | 'pro') => {
@@ -22,6 +23,22 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
       starter: "https://pay.kirvano.com/30cef9d1-c08e-49ed-b361-2862f182485f",
       pro: "https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939"
     };
+
+    // Meta Pixel: Track InitiateCheckout event
+    const checkoutData = {
+      pro: { value: 197.00, content_name: 'Franquia / Pro' },
+      starter: { value: 97.00, content_name: 'Pack Delivery' }
+    };
+    
+    // @ts-ignore - fbq is loaded globally via Meta Pixel script in index.html
+    if (typeof fbq !== 'undefined') {
+      // @ts-ignore
+      fbq('track', 'InitiateCheckout', {
+        value: checkoutData[planType].value,
+        currency: 'BRL',
+        content_name: checkoutData[planType].content_name
+      });
+    }
 
     const baseUrl = links[planType];
     const finalLink = user ? `${baseUrl}?external_id=${user}` : baseUrl;
