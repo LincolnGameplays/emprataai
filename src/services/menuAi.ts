@@ -159,12 +159,23 @@ Retorne APENAS um JSON válido:
       throw new Error("Resposta inválida da IA");
     }
 
-    // Ensure defaults
+    // Ensure defaults and convert improvedDescriptions array to Record
+    const descriptionsRecord: Record<string, string> = {};
+    if (Array.isArray(parsed.improvedDescriptions)) {
+      parsed.improvedDescriptions.forEach((item: any) => {
+        if (item.itemName && item.newDescription) {
+          descriptionsRecord[item.itemName] = item.newDescription;
+        }
+      });
+    } else if (typeof parsed.improvedDescriptions === 'object') {
+      Object.assign(descriptionsRecord, parsed.improvedDescriptions);
+    }
+
     return {
       categories: parsed.categories,
       suggestedHighlights: parsed.suggestedHighlights || [],
       orderBumps: parsed.orderBumps || [],
-      improvedDescriptions: parsed.improvedDescriptions || []
+      improvedDescriptions: descriptionsRecord
     };
   } catch (parseError) {
     console.error("❌ Erro ao parsear resposta da IA:", responseText);
