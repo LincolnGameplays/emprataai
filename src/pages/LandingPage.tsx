@@ -1,21 +1,135 @@
-import { motion } from 'framer-motion';
+/**
+ * Landing Page - Killer Conversion Design
+ * Bento Grid, Cinematic Hero, ROI Calculator
+ */
+
+import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { motion, useScroll, useTransform, useInView } from 'framer-motion';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
 import { 
-  Camera, Sparkles, TrendingUp, CheckCircle2, ChevronRight, 
-  Zap, ArrowRight, ShieldCheck, Clock, DollarSign, HelpCircle 
+  Zap, Camera, ChefHat, TrendingUp, Smartphone, QrCode,
+  CheckCircle, Star, ArrowRight, Play, Sparkles, DollarSign,
+  Users, Clock, Shield, HelpCircle, ChevronRight
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
-const BRANDS = ['SUCULÊNCIA', 'VENDAS', 'DELIVERY', 'APPS', 'LUCRO', 'PROFISSIONAL', 'DESEJO'];
+// ══════════════════════════════════════════════════════════════════
+// ANIMATION VARIANTS
+// ══════════════════════════════════════════════════════════════════
 
-const LandingPage = () => {
+const fadeInUp = {
+  initial: { opacity: 0, y: 40 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.6, ease: [0.22, 1, 0.36, 1] }
+};
+
+const stagger = {
+  animate: { transition: { staggerChildren: 0.1 } }
+};
+
+// ══════════════════════════════════════════════════════════════════
+// SOCIAL PROOF BRANDS
+// ══════════════════════════════════════════════════════════════════
+
+const BRANDS = [
+  'Burger Kingdom', 'Pizza Express', 'Açaí Premium', 'Sushi Master',
+  'Poke Bowl', 'Fit Kitchen', 'Taco Loco', 'Frozen Delights'
+];
+
+// ══════════════════════════════════════════════════════════════════
+// ANIMATED SECTION WRAPPER
+// ══════════════════════════════════════════════════════════════════
+
+function AnimatedSection({ 
+  children, 
+  className = '',
+  id
+}: { 
+  children: React.ReactNode; 
+  className?: string;
+  id?: string;
+}) {
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true, margin: '-100px' });
+
+  return (
+    <motion.section
+      ref={ref}
+      id={id}
+      initial={{ opacity: 0, y: 60 }}
+      animate={isInView ? { opacity: 1, y: 0 } : {}}
+      transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+      className={className}
+    >
+      {children}
+    </motion.section>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BENTO CARD COMPONENT
+// ══════════════════════════════════════════════════════════════════
+
+function BentoCard({
+  title,
+  description,
+  icon,
+  className = '',
+  gradient = false,
+  children
+}: {
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  className?: string;
+  gradient?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <motion.div
+      whileHover={{ scale: 1.02, y: -5 }}
+      className={`
+        relative p-6 md:p-8 rounded-3xl border border-white/10
+        bg-gradient-to-br from-white/5 to-transparent
+        overflow-hidden group cursor-pointer
+        ${className}
+      `}
+    >
+      {/* Hover gradient */}
+      <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+      
+      {/* Content */}
+      <div className="relative z-10">
+        <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+          {icon}
+        </div>
+        <h3 className="text-xl md:text-2xl font-black tracking-tight mb-2">{title}</h3>
+        <p className="text-white/50 text-sm md:text-base">{description}</p>
+        {children}
+      </div>
+    </motion.div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ══════════════════════════════════════════════════════════════════
+
+export default function LandingPage() {
   const { user } = useAuth();
+  const [ordersPerDay, setOrdersPerDay] = useState(50);
+  
+  // Parallax
+  const { scrollY } = useScroll();
+  const heroY = useTransform(scrollY, [0, 500], [0, 150]);
+  const heroOpacity = useTransform(scrollY, [0, 300], [1, 0]);
+
+  // ROI Calculation
+  const lostRevenue = Math.round(ordersPerDay * 0.15 * 35 * 30);
 
   /**
-   * Handle checkout process - HARDCODED KIRVANO LINKS
-   * Works for both logged-in and anonymous users
-   * @param plan - 'starter' or 'pro'
+   * Handle checkout
    */
   const handleCheckout = (plan: 'starter' | 'pro') => {
     const links = {
@@ -23,473 +137,583 @@ const LandingPage = () => {
       pro: "https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939"
     };
     const url = links[plan];
-    // Se tiver user, manda ID. Se não, manda limpo (Webhook resolve por email).
     const finalLink = user ? `${url}?external_id=${user.uid}` : url;
     window.open(finalLink, '_blank');
   };
 
   return (
-    <div className="flex flex-col bg-[#0a0a0a] text-white selection:bg-primary/30">
+    <div className="min-h-screen bg-[#050505] text-white overflow-x-hidden">
       
-      {/* Floating CTA (Mobile) */}
-      <div className="md:hidden fixed bottom-6 left-0 right-0 px-6 z-50">
-        <Link to="/app">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="w-full bg-neon-orange text-white py-5 rounded-3xl shadow-2xl flex items-center justify-center gap-3 text-xl font-black italic tracking-ultra-tight"
-          >
-            TESTAR GRÁTIS
-            <ArrowRight className="w-6 h-6" />
-          </motion.button>
-        </Link>
-      </div>
-
-      {/* Nav */}
-      <nav className="max-w-7xl mx-auto w-full px-6 py-8 flex justify-between items-center z-20">
-        <div className="text-3xl font-black tracking-ultra-tight text-white">
-          Emprata<span className="text-neon-orange italic">.ai</span>
-        </div>
-        <div className="hidden md:flex gap-10 items-center font-bold text-white/50 text-sm uppercase tracking-widest">
-          <a href="#how" className="hover:text-white transition-colors">Tecnologia</a>
-          <a href="#benefits" className="hover:text-white transition-colors">Ganhos</a>
-          <a href="#pricing" className="hover:text-white transition-colors">Planos</a>
-          <Link to="/app">
-            <button className="bg-white/5 border border-white/10 text-white px-8 py-3 rounded-2xl font-black hover:bg-white/10 transition-all uppercase tracking-tight-titles">
-              Acessar Engine
-            </button>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* NAVBAR */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-black/50 backdrop-blur-xl border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <Link to="/" className="text-2xl font-black italic tracking-tighter">
+            Emprata<span className="text-primary">.ai</span>
           </Link>
+
+          <div className="hidden md:flex items-center gap-8 text-sm font-bold text-white/50">
+            <a href="#features" className="hover:text-white transition-colors">Features</a>
+            <a href="#pricing" className="hover:text-white transition-colors">Preços</a>
+            <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {user ? (
+              <Link to="/dashboard">
+                <motion.button 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="px-6 py-2.5 bg-primary rounded-full font-bold text-sm"
+                >
+                  Dashboard
+                </motion.button>
+              </Link>
+            ) : (
+              <>
+                <Link to="/auth" className="hidden md:block text-sm font-bold text-white/60 hover:text-white px-4 py-2">
+                  Entrar
+                </Link>
+                <Link to="/dashboard">
+                  <motion.button 
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="px-6 py-2.5 bg-primary rounded-full font-bold text-sm shadow-lg shadow-primary/30"
+                  >
+                    Começar Grátis
+                  </motion.button>
+                </Link>
+              </>
+            )}
+          </div>
         </div>
       </nav>
 
-      {/* Hero: ATTENTION */}
-      <header className="relative max-w-7xl mx-auto px-6 pt-16 pb-32 flex flex-col items-center text-center overflow-hidden">
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* HERO SECTION - CINEMATIC */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <header className="relative min-h-screen flex items-center justify-center pt-20 overflow-hidden">
         {/* Background Gradients */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[80%] h-[500px] bg-primary/20 blur-[120px] rounded-full z-0 opacity-20" />
-        
-        <motion.div
-           initial={{ opacity: 0, y: 30 }}
-           animate={{ opacity: 1, y: 0 }}
-           className="z-10 relative"
-        >
-          <div className="inline-block px-4 py-2 bg-white/5 border border-white/10 rounded-full mb-8">
-             <span className="text-[10px] font-black uppercase tracking-[0.4em] text-neon-orange">Emprata Neural Engine™ v2.5</span>
-          </div>
-          
-          <h1 className="text-5xl md:text-8xl font-black tracking-ultra-tight leading-[0.95] mb-10 max-w-5xl mx-auto uppercase italic">
-            PARE DE PERDER <span className="text-neon-orange">DINHEIRO</span> NO DELIVERY <br />
-            POR CAUSA DE <span className="text-red-500">FOTO FEIA.</span>
-          </h1>
-          
-          <p className="text-xl md:text-2xl font-bold text-white/70 max-w-3xl mx-auto mb-12 leading-relaxed">
-            A tecnologia <span className="text-neon-orange italic">Neural Engine™</span> que os gigantes usam para fazer você salivar, agora nas suas mãos. <br />
-            <span className="text-white text-2xl md:text-3xl block mt-4">Aumente suas vendas em até 3x ou seu dinheiro de volta.</span>
-          </p>
+        <div className="absolute inset-0">
+          <div className="absolute top-1/4 left-1/4 w-[600px] h-[600px] bg-primary/20 rounded-full blur-[150px] opacity-50" />
+          <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-purple-500/20 rounded-full blur-[120px] opacity-30" />
+        </div>
 
-          <Link to="/app">
-             <motion.button 
-               whileHover={{ scale: 1.05 }}
-               whileTap={{ scale: 0.95 }}
-               animate={{ scale: [1, 1.02, 1] }}
-               transition={{ repeat: Infinity, duration: 2 }}
-               className="bg-neon-orange text-white px-12 py-8 rounded-[2.5rem] text-3xl font-black uppercase italic tracking-ultra-tight shadow-orange-intense mb-20 group shimmer"
-             >
-                Quero Vender Mais Agora
-                <Zap className="inline-block ml-4 w-9 h-9 fill-current group-hover:rotate-12 transition-transform" />
-             </motion.button>
-          </Link>
+        {/* Grid Pattern */}
+        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwIDEwIEwgNDAgMTAgTSAxMCAwIEwgMTAgNDAgTSAwIDIwIEwgNDAgMjAgTSAyMCAwIEwgMjAgNDAgTSAwIDMwIEwgNDAgMzAgTSAzMCAwIEwgMzAgNDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLW9wYWNpdHk9IjAuMDMiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-50" />
+
+        <motion.div 
+          style={{ y: heroY, opacity: heroOpacity }}
+          className="relative z-10 max-w-6xl mx-auto px-6 text-center"
+        >
+          {/* Badge */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full mb-8"
+          >
+            <Sparkles className="w-4 h-4 text-primary" />
+            <span className="text-xs font-bold uppercase tracking-widest text-white/60">
+              Neural Engine v3.0 — IA Generativa
+            </span>
+          </motion.div>
+
+          {/* Headline */}
+          <motion.h1
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3, duration: 0.8 }}
+            className="text-5xl md:text-7xl lg:text-8xl font-black tracking-tighter leading-[0.9] mb-6"
+          >
+            O Sistema Operacional<br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary via-orange-400 to-yellow-500">
+              do seu Delivery.
+            </span>
+          </motion.h1>
+
+          {/* Subheadline */}
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+            className="text-xl md:text-2xl text-white/50 max-w-3xl mx-auto mb-10 leading-relaxed"
+          >
+            IA que <span className="text-white font-bold">fotografa</span>, 
+            Cardápio que <span className="text-white font-bold">vende</span> e 
+            Gestão que <span className="text-white font-bold">lucra</span>.
+          </motion.p>
+
+          {/* CTAs */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-4"
+          >
+            <Link to="/dashboard">
+              <motion.button
+                whileHover={{ scale: 1.05, boxShadow: '0 0 40px rgba(255,107,0,0.4)' }}
+                whileTap={{ scale: 0.95 }}
+                className="px-8 py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black text-lg uppercase tracking-wide flex items-center gap-3 shadow-2xl shadow-primary/30"
+              >
+                <Zap className="w-5 h-5 fill-current" />
+                Começar Grátis
+              </motion.button>
+            </Link>
+            <button className="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl font-bold text-lg flex items-center gap-3 transition-colors">
+              <Play className="w-5 h-5" />
+              Ver Demo
+            </button>
+          </motion.div>
+
+          {/* Floating Mockup */}
+          <motion.div
+            initial={{ opacity: 0, y: 60 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.9, duration: 1 }}
+            className="mt-16 relative"
+          >
+            <motion.div
+              animate={{ y: [0, -10, 0] }}
+              transition={{ repeat: Infinity, duration: 4, ease: 'easeInOut' }}
+              className="relative mx-auto max-w-4xl"
+            >
+              <div className="aspect-video bg-gradient-to-br from-white/10 to-white/5 rounded-3xl border border-white/10 overflow-hidden shadow-2xl">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
+                <img 
+                  src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=1200&q=80"
+                  alt="Food Photography"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
+                  <div className="bg-black/60 backdrop-blur-xl rounded-2xl px-6 py-3 border border-white/10">
+                    <span className="text-primary font-black">+847%</span>
+                    <span className="text-white/60 text-sm ml-2">mais cliques</span>
+                  </div>
+                  <div className="bg-primary rounded-2xl px-6 py-3 font-bold">
+                    Foto gerada por IA
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
         </motion.div>
 
-        {/* Visual: Slider Compare - DRAMATIC CONTRAST */}
-        <motion.div 
-           initial={{ opacity: 0, scale: 0.9 }}
-           whileInView={{ opacity: 1, scale: 1 }}
-           viewport={{ once: true }}
-           className="w-full max-w-6xl relative z-10"
+        {/* Scroll Indicator */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 1.5 }}
+          className="absolute bottom-8 left-1/2 -translate-x-1/2"
         >
-          <div className="rounded-[4rem] overflow-hidden border-[16px] border-[#1a1a1a] shadow-[0_50px_100px_-20px_rgba(0,0,0,1)]">
-            <ReactCompareSlider
-              position={50}
-              handle={
-                <div className="w-1.5 h-full bg-neon-orange relative flex items-center justify-center">
-                   <div className="absolute w-14 h-14 bg-neon-orange rounded-full shadow-2xl flex items-center justify-center border-4 border-[#0a0a0a]">
-                      <Zap className="w-7 h-7 text-white fill-current" />
-                   </div>
-                </div>
-              }
-              itemOne={
-                <div className="relative h-[600px]">
-                  <ReactCompareSliderImage 
-                    src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?q=80&w=1200" 
-                    alt="Antes - Foto Amadora" 
-                    className="w-full h-full object-cover"
-                    style={{
-                      filter: 'contrast(0.7) brightness(0.8) sepia(0.3) blur(1px) saturate(0.6) hue-rotate(10deg)',
-                    }}
-                  />
-                  <div className="absolute top-8 left-8 bg-red-900/80 px-6 py-3 rounded-full border border-red-500/30 backdrop-blur-sm">
-                    <span className="uppercase font-black text-sm tracking-wider text-white/90">
-                      Sua foto hoje (Amadora)
-                    </span>
-                  </div>
-                  <div className="absolute bottom-8 left-8 bg-black/60 px-4 py-2 rounded-2xl border border-white/10">
-                    <p className="text-xs font-bold text-white/40 uppercase tracking-widest">😔 Cliente passa direto</p>
-                  </div>
-                </div>
-              }
-              itemTwo={
-                <div className="relative h-[600px]">
-                  <ReactCompareSliderImage 
-                    src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?q=80&w=1200" 
-                    alt="Depois - Emprata AI" 
-                    className="w-full h-full object-cover"
-                    style={{
-                      filter: 'saturate(1.4) contrast(1.15) brightness(1.05) sharpen(1.2)',
-                    }}
-                  />
-                  <div className="absolute top-8 right-8 bg-neon-orange px-6 py-3 rounded-full shadow-xl shadow-orange-500/50">
-                    <span className="uppercase font-black text-sm tracking-wider text-white">
-                      Com Emprata AI (Vende Muito)
-                    </span>
-                  </div>
-                  <div className="absolute bottom-12 right-12 flex flex-col items-end gap-2">
-                     <div className="bg-black/80 p-6 rounded-3xl border border-white/10 backdrop-blur-xl animate-bounce">
-                        <span className="text-3xl font-black text-neon-orange tracking-ultra-tight">+240%</span>
-                        <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Aumento em Conversão</p>
-                     </div>
-                  </div>
-                </div>
-              }
-              style={{ width: '100%', height: '600px' }}
-            />
-          </div>
+          <motion.div
+            animate={{ y: [0, 10, 0] }}
+            transition={{ repeat: Infinity, duration: 1.5 }}
+            className="w-6 h-10 border-2 border-white/20 rounded-full flex justify-center pt-2"
+          >
+            <div className="w-1.5 h-1.5 bg-white/40 rounded-full" />
+          </motion.div>
         </motion.div>
       </header>
 
-      {/* Marquee: DOPAMINE */}
-      <div className="py-10 bg-neon-orange/10 border-y border-white/5 overflow-hidden">
-        <div className="flex animate-[scroll_20s_linear_infinite]">
-          <div className="flex gap-24 items-center shrink-0">
-            {Array(10).fill(null).map((_, i) => (
-              <div key={i} className="flex gap-24 items-center">
-                {BRANDS.map(brand => (
-                  <span key={`${brand}-${i}`} className="text-4xl font-black text-white/20 italic tracking-ultra-tight uppercase whitespace-nowrap">{brand}</span>
-                ))}
-              </div>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* SOCIAL PROOF TICKER */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div className="py-8 border-y border-white/5 bg-white/[0.02] overflow-hidden">
+        <div className="flex items-center">
+          <span className="px-6 text-xs font-bold uppercase tracking-widest text-white/30 whitespace-nowrap">
+            Usado por deliveries que faturam alto:
+          </span>
+          <div className="flex animate-[scroll_30s_linear_infinite]">
+            {[...BRANDS, ...BRANDS].map((brand, i) => (
+              <span 
+                key={i} 
+                className="px-8 text-lg font-black text-white/20 whitespace-nowrap"
+              >
+                {brand}
+              </span>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Section 2: INTEREST (The Engine) */}
-      <section id="how" className="max-w-7xl mx-auto px-6 py-40">
-        <div className="grid md:grid-cols-2 gap-24 items-center">
-          <motion.div
-            initial={{ opacity: 0, x: -50 }}
-            whileInView={{ opacity: 1, x: 0 }}
-            viewport={{ once: true }}
-            className="space-y-8"
-          >
-            <div className="w-20 h-2 bg-neon-orange rounded-full" />
-            <h2 className="text-5xl md:text-7xl font-black tracking-tight leading-[1.1] uppercase">Conheça o Emprata <span className="text-neon-orange">Neural Engine™</span></h2>
-            <p className="text-xl md:text-2xl text-white/50 leading-relaxed font-medium">
-               Não é filtro. É <span className="text-white">Ciência Gastronômica</span>. <br /><br />
-               Nosso motor exclusivo analisa textura, iluminação e suculência para recriar o ambiente perfeito que dispara o gatilho da fome no cérebro do seu cliente.
-            </p>
-            <ul className="space-y-4 pt-6">
-              {['Remoção Neural de Fundo', 'Relighting de Alta Gastronomia', 'Texturização via IA'].map(item => (
-                <li key={item} className="flex items-center gap-4 text-lg font-bold">
-                  <div className="w-6 h-6 bg-neon-orange rounded-full flex items-center justify-center">
-                    <CheckCircle2 className="w-4 h-4 text-white" />
-                  </div>
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </motion.div>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* PROBLEM VS SOLUTION SLIDER */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <AnimatedSection className="max-w-6xl mx-auto px-6 py-24">
+        <div className="text-center mb-12">
+          <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
+            A diferença está nos <span className="text-primary">detalhes.</span>
+          </h2>
+          <p className="text-white/50 text-lg max-w-2xl mx-auto">
+            Arraste para ver a transformação que multiplica suas vendas.
+          </p>
+        </div>
 
-          <div className="relative aspect-square">
-             {/* Neural Animation Mock */}
-             <div className="absolute inset-0 bg-white/5 border border-white/10 rounded-[4rem] overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-transparent" />
-                <motion.div 
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 20, ease: "linear" }}
-                  className="absolute inset-20 border-[2px] border-dashed border-white/10 rounded-full" 
-                />
-                <motion.div 
-                   animate={{ scale: [1, 1.1, 1] }} 
-                   transition={{ repeat: Infinity, duration: 4 }}
-                   className="absolute inset-40 bg-neon-orange/20 blur-[60px] rounded-full" 
-                />
-                <div className="absolute inset-0 flex items-center justify-center">
-                   <div className="text-center space-y-4">
-                      <Sparkles className="w-24 h-24 text-neon-orange mx-auto animate-pulse" />
-                      <span className="block text-2xl font-black italic tracking-widest uppercase opacity-40">Analysing Texture...</span>
-                   </div>
+        <div className="rounded-3xl overflow-hidden border border-white/10 shadow-2xl">
+          <ReactCompareSlider
+            position={50}
+            handle={
+              <div className="w-1 h-full bg-primary flex items-center justify-center">
+                <div className="w-12 h-12 bg-primary rounded-full shadow-xl flex items-center justify-center border-4 border-black">
+                  <Zap className="w-5 h-5 text-white" />
                 </div>
-             </div>
+              </div>
+            }
+            itemOne={
+              <div className="relative h-[500px]">
+                <ReactCompareSliderImage
+                  src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=1200&q=80"
+                  alt="Antes"
+                  className="w-full h-full object-cover"
+                  style={{ filter: 'brightness(0.6) saturate(0.5) contrast(0.8)' }}
+                />
+                <div className="absolute top-6 left-6 bg-red-900/80 backdrop-blur px-4 py-2 rounded-full border border-red-500/30">
+                  <span className="text-sm font-bold text-red-300">❌ Foto de Celular</span>
+                </div>
+                <div className="absolute bottom-6 left-6 bg-black/80 backdrop-blur px-4 py-2 rounded-xl">
+                  <span className="text-white/50 text-sm">Conversão: <span className="text-red-400 font-bold">2.1%</span></span>
+                </div>
+              </div>
+            }
+            itemTwo={
+              <div className="relative h-[500px]">
+                <ReactCompareSliderImage
+                  src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=1200&q=80"
+                  alt="Depois"
+                  className="w-full h-full object-cover"
+                  style={{ filter: 'saturate(1.3) contrast(1.1) brightness(1.05)' }}
+                />
+                <div className="absolute top-6 right-6 bg-primary px-4 py-2 rounded-full shadow-lg">
+                  <span className="text-sm font-bold">✨ Emprata.ai</span>
+                </div>
+                <div className="absolute bottom-6 right-6 bg-black/80 backdrop-blur px-4 py-2 rounded-xl">
+                  <span className="text-white/50 text-sm">Conversão: <span className="text-green-400 font-bold">8.7%</span></span>
+                </div>
+              </div>
+            }
+            style={{ height: '500px' }}
+          />
+        </div>
+      </AnimatedSection>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* BENTO GRID FEATURES */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <AnimatedSection id="features" className="max-w-6xl mx-auto px-6 py-24">
+        <div className="text-center mb-16">
+          <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
+            Tudo que você precisa.<br />
+            <span className="text-primary">Num só lugar.</span>
+          </h2>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4">
+          {/* Large Card - Neural Engine */}
+          <BentoCard
+            title="Neural Engine"
+            description="IA treinada em milhões de fotos gastronômicas. Transforma qualquer foto de celular em imagem profissional."
+            icon={<Camera className="w-6 h-6 text-primary" />}
+            className="md:col-span-2 md:row-span-2"
+          >
+            <div className="mt-6 aspect-video bg-black/50 rounded-2xl overflow-hidden border border-white/10">
+              <motion.img
+                animate={{ rotate: [0, 5, -5, 0] }}
+                transition={{ repeat: Infinity, duration: 8, ease: 'easeInOut' }}
+                src="https://images.unsplash.com/photo-1550547660-d9450f859349?w=600&q=80"
+                alt="Burger"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          </BentoCard>
+
+          {/* Medium Card - Cardápio */}
+          <BentoCard
+            title="Cardápio Vivo"
+            description="QR Code dinâmico com fotos que vendem. Atualização em tempo real."
+            icon={<QrCode className="w-6 h-6 text-blue-400" />}
+          >
+            <div className="mt-4 flex items-center gap-3">
+              <Smartphone className="w-8 h-8 text-white/20" />
+              <span className="text-xs text-white/40">Escaneie e veja</span>
+            </div>
+          </BentoCard>
+
+          {/* Medium Card - Garçom */}
+          <BentoCard
+            title="Modo Garçom"
+            description="App ultrarrápido para lançar pedidos. Sem treinamento."
+            icon={<ChefHat className="w-6 h-6 text-green-400" />}
+          >
+            <div className="mt-4 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-white/40" />
+              <span className="text-xs text-white/40">Setup em 2 min</span>
+            </div>
+          </BentoCard>
+
+          {/* Small Card - Analytics */}
+          <BentoCard
+            title="Analytics em Tempo Real"
+            description="Dashboard com métricas que importam."
+            icon={<TrendingUp className="w-6 h-6 text-purple-400" />}
+          />
+
+          {/* Small Card - Equipe */}
+          <BentoCard
+            title="Gestão de Equipe"
+            description="Controle de garçons e performance."
+            icon={<Users className="w-6 h-6 text-yellow-400" />}
+          />
+
+          {/* Small Card - Segurança */}
+          <BentoCard
+            title="Seguro e Rápido"
+            description="Dados criptografados. 99.9% uptime."
+            icon={<Shield className="w-6 h-6 text-cyan-400" />}
+          />
+        </div>
+      </AnimatedSection>
+
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* ROI CALCULATOR */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <AnimatedSection className="max-w-4xl mx-auto px-6 py-24">
+        <div className="bg-gradient-to-br from-white/5 to-transparent border border-white/10 rounded-3xl p-8 md:p-12">
+          <div className="text-center mb-8">
+            <h2 className="text-3xl md:text-4xl font-black tracking-tighter mb-2">
+              Calculadora de <span className="text-primary">Oportunidade Perdida</span>
+            </h2>
+            <p className="text-white/50">Descubra quanto dinheiro você está deixando escapar.</p>
+          </div>
+
+          <div className="space-y-8">
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-sm font-bold text-white/60">Pedidos por dia:</span>
+                <span className="text-2xl font-black text-primary">{ordersPerDay}</span>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="200"
+                value={ordersPerDay}
+                onChange={(e) => setOrdersPerDay(parseInt(e.target.value))}
+                className="w-full h-2 bg-white/10 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-6 [&::-webkit-slider-thumb]:h-6 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
+              />
+            </div>
+
+            <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 text-center">
+              <p className="text-sm text-red-400 mb-2">
+                Você está deixando na mesa por mês:
+              </p>
+              <p className="text-4xl md:text-5xl font-black text-red-400">
+                R$ {lostRevenue.toLocaleString('pt-BR')}
+              </p>
+              <p className="text-xs text-white/40 mt-2">
+                * Baseado em 15% de aumento de conversão com fotos profissionais
+              </p>
+            </div>
+
+            <Link to="/dashboard" className="block">
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="w-full py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black text-lg transition-colors"
+              >
+                Recuperar Esse Dinheiro Agora
+              </motion.button>
+            </Link>
           </div>
         </div>
-      </section>
+      </AnimatedSection>
 
-      {/* Section 3: DESIRE (Bento Grid) */}
-      <section id="benefits" className="max-w-7xl mx-auto px-6 py-20">
-         <div className="text-center mb-24">
-            <h2 className="text-5xl md:text-7xl font-black uppercase italic italic tracking-tighter">O Delivery <span className="text-neon-orange">Imparável.</span></h2>
-         </div>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* PRICING */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <AnimatedSection id="pricing" className="max-w-6xl mx-auto px-6 py-24">
+        <div className="text-center mb-16">
+          <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-4">
+            Preço Justo.<br />
+            <span className="text-primary">Valor Absurdo.</span>
+          </h2>
+        </div>
 
-         <div className="grid md:grid-cols-3 gap-8">
-            <motion.div 
-              whileHover={{ rotateY: 10, rotateX: -5 }}
-              className="glass-card glass-card-hover p-12 rounded-[3.5rem] md:col-span-2 relative overflow-hidden"
+        <div className="grid md:grid-cols-3 gap-6 items-stretch">
+          {/* Free */}
+          <div className="bg-white/5 border border-white/10 rounded-3xl p-8 flex flex-col">
+            <h3 className="text-2xl font-black mb-2">Grátis</h3>
+            <p className="text-4xl font-black mb-6">R$ 0</p>
+            <ul className="space-y-3 mb-8 flex-1 text-sm text-white/60">
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-white/30" />
+                1 crédito para testar
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-white/30" />
+                Resolução 720p
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-white/30" />
+                Com marca d'água
+              </li>
+            </ul>
+            <Link to="/dashboard">
+              <button className="w-full py-4 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition-colors">
+                Começar Grátis
+              </button>
+            </Link>
+          </div>
+
+          {/* Starter */}
+          <div className="bg-white/5 border border-white/10 rounded-3xl p-8 flex flex-col">
+            <h3 className="text-2xl font-black mb-2">Pack Delivery</h3>
+            <div className="flex items-baseline gap-2 mb-6">
+              <span className="text-4xl font-black">R$ 97</span>
+              <span className="text-white/40">/mês</span>
+            </div>
+            <ul className="space-y-3 mb-8 flex-1 text-sm">
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-blue-400" />
+                50 créditos/mês
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-blue-400" />
+                Full HD (1080p)
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-blue-400" />
+                Sem marca d'água
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-blue-400" />
+                Todos os estilos
+              </li>
+            </ul>
+            <button 
+              onClick={() => handleCheckout('starter')}
+              className="w-full py-4 bg-blue-500 hover:bg-blue-600 rounded-xl font-bold transition-colors"
             >
-               <TrendingUp className="w-16 h-16 text-neon-orange mb-8" />
-               <h3 className="text-4xl font-extrabold mb-4 uppercase">O Fim da Guerra de Preços</h3>
-               <p className="text-xl text-white/50 font-bold max-w-md italic">
-                  <span className="text-white text-2xl block mb-2">Cobre mais caro pela mesma comida.</span>
-                  Quando sua foto é irresistível, o cliente não compara preço. Ele compra.
-               </p>
-               <div className="absolute bottom-0 right-0 p-12 text-9xl font-black opacity-[0.03] uppercase italic">Sales</div>
+              Assinar Pack
+            </button>
+          </div>
+
+          {/* Pro */}
+          <div className="relative bg-gradient-to-br from-primary/20 to-transparent border-2 border-primary rounded-3xl p-8 flex flex-col scale-105 shadow-2xl shadow-primary/20">
+            {/* Badge */}
+            <motion.div
+              animate={{ opacity: [1, 0.7, 1] }}
+              transition={{ repeat: Infinity, duration: 2 }}
+              className="absolute -top-4 left-1/2 -translate-x-1/2 bg-primary px-4 py-1 rounded-full text-xs font-black uppercase tracking-wider"
+            >
+              ⭐ Mais Vendido
             </motion.div>
 
-            <motion.div 
-              whileHover={{ rotateY: -10, rotateX: 5 }}
-              className="glass-card glass-card-hover p-12 rounded-[3.5rem] bg-neon-orange"
+            <h3 className="text-2xl font-black mb-2 mt-4">Franquia / Pro</h3>
+            <div className="flex items-baseline gap-2 mb-6">
+              <span className="text-4xl font-black text-primary">R$ 197</span>
+              <span className="text-white/40">/mês</span>
+            </div>
+            <ul className="space-y-3 mb-8 flex-1 text-sm">
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-primary" />
+                <span className="font-bold">200 créditos/mês</span>
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-primary" />
+                4K Ultra HD
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-primary" />
+                Estilos exclusivos
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-primary" />
+                Suporte prioritário
+              </li>
+              <li className="flex items-center gap-2">
+                <CheckCircle className="w-4 h-4 text-primary" />
+                Processamento rápido
+              </li>
+            </ul>
+            <motion.button
+              whileHover={{ scale: 1.02, boxShadow: '0 0 30px rgba(255,107,0,0.5)' }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => handleCheckout('pro')}
+              className="w-full py-4 bg-primary hover:bg-orange-600 rounded-xl font-black transition-colors"
             >
-               <Clock className="w-16 h-16 text-white mb-8" />
-               <h3 className="text-4xl font-extrabold mb-4 uppercase">Cardápios em Minutos</h3>
-               <p className="text-xl text-white font-bold opacity-80 leading-tight">
-                  <span className="text-2xl block mb-2">Não semanas. MINUTOS.</span>
-                  Gere cardápios inteiros profissionais enquanto seu concorrente ainda está editando a primeira foto.
-               </p>
-            </motion.div>
+              Quero Lucrar Mais
+            </motion.button>
+          </div>
+        </div>
+      </AnimatedSection>
 
-            <motion.div 
-              whileHover={{ rotateX: 10 }}
-              className="glass-card glass-card-hover p-12 rounded-[3.5rem]"
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* FAQ */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <AnimatedSection id="faq" className="max-w-4xl mx-auto px-6 py-24">
+        <div className="text-center mb-12">
+          <h2 className="text-4xl font-black tracking-tighter mb-4">
+            Dúvidas? <span className="text-primary">Respostas.</span>
+          </h2>
+        </div>
+
+        <div className="space-y-4">
+          {[
+            { q: 'Preciso saber editar fotos?', a: 'Não! A IA faz tudo automaticamente. Você só precisa tirar a foto e clicar em gerar.' },
+            { q: 'Funciona para qualquer tipo de comida?', a: 'Sim! Treinamos a IA em milhões de fotos de todos os tipos: pizzas, burgers, sushi, marmitas, sobremesas...' },
+            { q: 'Posso cancelar a qualquer momento?', a: 'Com certeza. Sem multas, sem burocracia. Cancele direto no painel.' },
+            { q: 'As fotos parecem reais?', a: 'Absolutamente. Nossa tecnologia Neural Engine simula iluminação física real, garantindo fotos hiper-realistas.' },
+          ].map((item, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: i * 0.1 }}
+              className="bg-white/5 border border-white/10 rounded-2xl p-6"
             >
-               <DollarSign className="w-16 h-16 text-neon-orange mb-8" />
-               <h3 className="text-4xl font-extrabold mb-4 uppercase">Top 5% do Ranking</h3>
-               <p className="text-xl text-white/50 font-bold">
-                  <span className="text-white text-2xl block mb-2">Junte-se à elite.</span>
-                  Apenas 5% dos restaurantes dominam os apps de delivery. Todos têm fotos profissionais. Coincidência?
-               </p>
+              <h4 className="font-bold text-lg flex items-start gap-3">
+                <HelpCircle className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+                {item.q}
+              </h4>
+              <p className="text-white/50 mt-2 ml-8">{item.a}</p>
             </motion.div>
+          ))}
+        </div>
+      </AnimatedSection>
 
-            <motion.div 
-              whileHover={{ rotateY: 5 }}
-              className="glass-card glass-card-hover p-12 rounded-[3.5rem] md:col-span-2 flex flex-col md:flex-row gap-8 items-center"
-            >
-               <ShieldCheck className="w-24 h-24 text-green-500 shrink-0" />
-               <div>
-                  <h3 className="text-4xl font-extrabold mb-4 uppercase tracking-tighter italic">Garantia de Conversão</h3>
-                  <p className="text-xl text-white/50 font-bold max-w-sm">
-                     Se seu clique no app de delivery não aumentar, devolvemos seu tempo (e seu investimento).
-                  </p>
-               </div>
-            </motion.div>
-         </div>
-
-         {/* FOMO BANNER */}
-         <div className="mt-12 bg-white/5 border-2 border-dashed border-white/20 p-8 rounded-[2.5rem] text-center">
-            <p className="text-xl font-black uppercase tracking-widest text-[#FFC107] animate-pulse">
-               ⚠️ Atenção: Devido à alta demanda de processamento, estamos limitando novos acessos diários.
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* FOOTER */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <footer className="border-t border-white/5 py-12">
+        <div className="max-w-6xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="text-2xl font-black italic tracking-tighter">
+              Emprata<span className="text-primary">.ai</span>
+            </div>
+            <div className="flex items-center gap-6 text-sm text-white/40">
+              <Link to="/privacy" className="hover:text-white transition-colors">Privacidade</Link>
+              <Link to="/terms" className="hover:text-white transition-colors">Termos</Link>
+              <a href="mailto:suporte@emprata.ai" className="hover:text-white transition-colors">Suporte</a>
+            </div>
+            <p className="text-xs text-white/30">
+              © 2025 Emprata.ai • Todos os direitos reservados
             </p>
-         </div>
-      </section>
-
-      {/* Section 4: ACTION (Pricing & FAQ) */}
-      <section id="pricing" className="max-w-7xl mx-auto px-6 py-40">
-         <div className="text-center mb-20">
-            <h2 className="text-5xl md:text-7xl font-black uppercase italic tracking-tighter mb-6">
-              Escolha Seu <span className="text-neon-orange">Arsenal</span>
-            </h2>
-            <p className="text-xl text-white/50 font-medium max-w-2xl mx-auto">
-              De teste gratuito a domínio total do mercado. Você escolhe o ritmo.
-            </p>
-         </div>
-
-         <div className="grid md:grid-cols-3 gap-8 items-stretch mb-32">
-            
-            {/* TIER 1: FREE - Degustação */}
-            <div className="glass-card p-10 rounded-[3.5rem] border-white/5 flex flex-col">
-               <div className="mb-6">
-                  <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white/30">Teste Grátis</span>
-                  <h3 className="text-3xl font-black mt-2 mb-2 italic uppercase">Degustação</h3>
-               </div>
-               
-               <div className="mb-8">
-                  <div className="text-6xl font-black tracking-tight-titles mb-2 italic">R$ 0</div>
-                  <p className="text-sm font-bold text-white/40">Sem cartão • Sem compromisso</p>
-               </div>
-               
-               <ul className="space-y-3 mb-10 flex-grow text-sm font-bold text-white/60">
-                  <li className="flex gap-3 items-start">
-                     <CheckCircle2 className="w-5 h-5 text-white/20 shrink-0 mt-0.5" />
-                     <span><span className="text-white">1 Crédito Único</span> para testar</span>
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <CheckCircle2 className="w-5 h-5 text-white/20 shrink-0 mt-0.5" />
-                     Baixa Resolução (720p)
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <CheckCircle2 className="w-5 h-5 text-white/20 shrink-0 mt-0.5" />
-                     Com Marca d'água
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <CheckCircle2 className="w-5 h-5 text-white/20 shrink-0 mt-0.5" />
-                     Apenas 1 Estilo disponível
-                  </li>
-               </ul>
-               
-               <Link to="/app" className="mt-auto">
-                  <button className="w-full py-5 rounded-3xl border-2 border-white/10 font-black hover:bg-white/5 transition-all uppercase tracking-widest text-sm">
-                     Testar Agora
-                  </button>
-               </Link>
-            </div>
-
-            {/* TIER 2: STARTER - Pack Delivery */}
-            <div className="glass-card p-10 rounded-[3.5rem] border-white/10 flex flex-col relative">
-               <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-6 py-2 rounded-full font-black text-xs tracking-widest uppercase">
-                  🔥 Faça o Cardápio Inteiro
-               </div>
-               
-               <div className="mb-6 mt-4">
-                  <span className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Assinatura Mensal</span>
-                  <h3 className="text-3xl font-black mt-2 mb-2 italic uppercase">Pack Delivery</h3>
-               </div>
-               
-               <div className="mb-8">
-                  <div className="flex items-baseline gap-2 mb-2">
-                     <span className="text-6xl font-black tracking-tight-titles italic">R$ 97</span>
-                     <span className="text-xl font-bold text-white/40">/mês</span>
-                  </div>
-                  <p className="text-sm font-bold text-blue-400">50 Créditos Mensais (Acumulativos)</p>
-                  <p className="text-xs font-black text-white/30 mt-1">Apenas R$ 1,94 por foto 🔥</p>
-               </div>
-               
-               <ul className="space-y-3 mb-10 flex-grow text-sm font-bold">
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
-                     <span className="text-white">50 Créditos/mês</span>
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
-                     Resolução Full HD (1080p)
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
-                     Sem Marca d'água
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
-                     Todos os Estilos Pro
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-blue-400 fill-current shrink-0 mt-0.5" />
-                     Suporte via Email
-                  </li>
-               </ul>
-               
-               <button 
-                 onClick={() => handleCheckout('starter')}
-                 className="w-full py-6 rounded-3xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-lg transition-all hover:scale-[1.02] active:scale-95 mt-auto"
-               >
-                  Comprar Pack
-               </button>
-            </div>
-
-            {/* TIER 3: PRO - Franquia */}
-            <div className="glass-card p-10 rounded-[3.5rem] border-neon-orange shadow-[0_0_80px_rgba(255,94,0,0.15)] relative overflow-hidden flex flex-col scale-105">
-               <div className="absolute top-0 right-0 bg-neon-orange text-white px-8 py-2 rounded-bl-3xl font-black text-[10px] tracking-widest uppercase italic">
-                  MAIS VENDIDO • MELHOR ROI
-               </div>
-               
-               <div className="mb-6 mt-8">
-                  <span className="text-[10px] font-black uppercase tracking-[0.4em] text-neon-orange">Assinatura Mensal</span>
-                  <h3 className="text-3xl font-black mt-2 mb-2 italic uppercase">Franquia / Pro</h3>
-               </div>
-               
-               <div className="mb-8">
-                  <div className="flex items-baseline gap-2 mb-2">
-                     <span className="text-6xl font-black tracking-tight-titles italic">R$ 197</span>
-                     <span className="text-xl font-bold text-white/40">/mês</span>
-                  </div>
-                  <p className="text-sm font-bold text-neon-orange">200 Créditos Mensais + Vibes Exclusivas</p>
-                  <p className="text-xs font-black text-white/30 mt-1">Menos de R$ 1,00 por foto (R$ 0,98) 🚀</p>
-               </div>
-               
-               <div className="bg-neon-orange/10 border border-neon-orange/20 rounded-2xl p-4 mb-8">
-                  <p className="text-xs font-black text-neon-orange uppercase tracking-wider">
-                     💡 Ideal para Dark Kitchens e Franquias
-                  </p>
-               </div>
-               
-               <ul className="space-y-3 mb-10 flex-grow text-sm font-bold">
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     <span className="text-white">200 Créditos Premium/mês</span>
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     Resolução 4K Ultra HD
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     Sem Marca d'água
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     Todos os Estilos + Exclusivos
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     Suporte Prioritário WhatsApp
-                  </li>
-                  <li className="flex gap-3 items-start">
-                     <Zap className="w-5 h-5 text-neon-orange fill-current shrink-0 mt-0.5" />
-                     Processamento Mais Rápido
-                  </li>
-               </ul>
-               
-               <button 
-                 onClick={() => handleCheckout('pro')}
-                 className="w-full py-6 rounded-3xl bg-neon-orange font-black text-white shadow-xl shadow-primary/30 uppercase tracking-tighter text-lg hover:scale-[1.02] transition-all active:scale-95 mt-auto"
-               >
-                  Quero Lucro Máximo
-               </button>
-            </div>
-
-         </div>
-
-         {/* FAQ */}
-         <div className="max-w-3xl mx-auto">
-            <h3 className="text-4xl font-black uppercase text-center mb-16 italic underline decoration-neon-orange underline-offset-8">Matador de Dúvidas</h3>
-            <div className="space-y-6">
-               {[
-                 { q: 'Preciso saber design?', a: 'Zero. O Emprata Neural Engine™ faz tudo sozinho. É literalmente arrastar e baixar.' },
-                 { q: 'Funciona para qualquer prato?', a: 'Sim. Somos especialistas em Marmitas, Burgers, Pizzas e Sushi. A IA identifica a textura correta para cada categoria.' },
-                 { q: 'As fotos parecem reais?', a: 'Sim. A tecnologia Neural Engine™ simula física de luz real, garantindo que o cliente sinta vontade de morder a tela.' }
-               ].map((item, i) => (
-                 <div key={i} className="glass-card p-8 rounded-3xl border-white/5">
-                    <h5 className="text-lg font-black uppercase mb-4 flex gap-3 text-neon-orange"><HelpCircle className="w-6 h-6 shrink-0" /> {item.q}</h5>
-                    <p className="text-white/50 font-medium">{item.a}</p>
-                 </div>
-               ))}
-            </div>
-         </div>
-      </section>
-
-      <footer className="py-20 border-t border-white/5 text-center relative overflow-hidden">
-         <div className="relative z-10 space-y-8">
-            <div className="text-3xl font-black tracking-tighter italic">Emprata<span className="text-neon-orange">.ai</span></div>
-            <p className="text-white/30 text-xs font-bold uppercase tracking-[0.5em]">TECNOLOGIA GASTRONÔMICA PROPRIETÁRIA</p>
-         </div>
+          </div>
+        </div>
       </footer>
+
+      {/* Mobile CTA Fixed */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 p-4 bg-black/95 backdrop-blur-xl border-t border-white/10 z-50">
+        <Link to="/dashboard">
+          <button className="w-full py-4 bg-primary rounded-2xl font-black text-lg flex items-center justify-center gap-2">
+            <Zap className="w-5 h-5" />
+            Começar Grátis
+          </button>
+        </Link>
+      </div>
     </div>
   );
-};
-
-export default LandingPage;
+}

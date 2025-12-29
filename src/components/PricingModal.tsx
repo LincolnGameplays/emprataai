@@ -8,14 +8,22 @@ interface PricingModalProps {
   onClose: () => void;
 }
 
+// ══════════════════════════════════════════════════════════════════
+// PRICING VALUES - Single source of truth for conversion tracking
+// ══════════════════════════════════════════════════════════════════
+const PRICING = {
+  starter: { value: 97.00, content_name: 'Pack Delivery' },
+  pro: { value: 197.00, content_name: 'Franquia / Pro' }
+} as const;
+
 export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
   const user = useAppStore((state) => state.userId);
   
   /**
-   * Handle checkout process - HARDCODED LINKS
-   * NO LOGIN REQUIRED - NO ALERTS - DIRECT CHECKOUT
-   * Uses onClick ONLY - NO <a> tags
-   * Includes Meta Pixel InitiateCheckout tracking
+   * Handle checkout process with conversion funnel tracking
+   * 1. Saves purchase intent value to sessionStorage
+   * 2. Fires InitiateCheckout event for Meta Pixel
+   * 3. Opens Kirvano checkout link
    * @param planType - 'starter' or 'pro'
    */
   const handleCheckout = (planType: 'starter' | 'pro') => {
@@ -24,22 +32,42 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
       pro: "https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939"
     };
 
-    // Meta Pixel: Track InitiateCheckout event
-    const checkoutData = {
-      pro: { value: 197.00, content_name: 'Franquia / Pro' },
-      starter: { value: 97.00, content_name: 'Pack Delivery' }
-    };
-    
-    // @ts-ignore - fbq is loaded globally via Meta Pixel script in index.html
-    if (typeof fbq !== 'undefined') {
-      // @ts-ignore
-      fbq('track', 'InitiateCheckout', {
-        value: checkoutData[planType].value,
+    const purchaseValue = PRICING[planType].value;
+
+    // ════════════════════════════════════════════════════════════════
+    // STEP 1: Save purchase intent to sessionStorage for SuccessPage
+    // ════════════════════════════════════════════════════════════════
+    sessionStorage.setItem('purchase_intent_value', purchaseValue.toString());
+
+    // ════════════════════════════════════════════════════════════════
+    // STEP 2: Meta Pixel - Fire InitiateCheckout event BEFORE redirect
+    // ════════════════════════════════════════════════════════════════
+    if (typeof window.fbq === 'function') {
+      window.fbq('track', 'InitiateCheckout', {
+        value: purchaseValue,
         currency: 'BRL',
-        content_name: checkoutData[planType].content_name
+        content_name: PRICING[planType].content_name
       });
     }
 
+    // ════════════════════════════════════════════════════════════════
+    // STEP 3: GA4 - Fire begin_checkout event
+    // ════════════════════════════════════════════════════════════════
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', 'begin_checkout', {
+        value: purchaseValue,
+        currency: 'BRL',
+        items: [{
+          item_name: PRICING[planType].content_name,
+          price: purchaseValue,
+          quantity: 1
+        }]
+      });
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // STEP 4: Open checkout link with external_id if logged in
+    // ════════════════════════════════════════════════════════════════
     const baseUrl = links[planType];
     const finalLink = user ? `${baseUrl}?external_id=${user}` : baseUrl;
     

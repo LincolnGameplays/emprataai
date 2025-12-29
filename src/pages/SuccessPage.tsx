@@ -1,19 +1,74 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle2, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../hooks/useAuth';
 
+// ══════════════════════════════════════════════════════════════════
+// CONVERSION TRACKING - Fires Purchase event on page mount
+// ══════════════════════════════════════════════════════════════════
+
 export default function SuccessPage() {
   const navigate = useNavigate();
   const { userData, refreshUser } = useAuth();
+  
+  // Ref to ensure conversion events fire only once
+  const hasTracked = useRef(false);
 
   useEffect(() => {
     // Refresh user data to get latest credits
     refreshUser();
 
-    // Fire confetti animation
+    // ════════════════════════════════════════════════════════════════
+    // CONVERSION TRACKING - Fire Purchase events ONCE
+    // ════════════════════════════════════════════════════════════════
+    if (!hasTracked.current) {
+      hasTracked.current = true;
+
+      // Retrieve purchase intent value from sessionStorage
+      const storedValue = sessionStorage.getItem('purchase_intent_value');
+      const purchaseValue = storedValue ? parseFloat(storedValue) : 0;
+
+      // ══════════════════════════════════════════════════════════
+      // META PIXEL: Fire Purchase event
+      // ══════════════════════════════════════════════════════════
+      if (typeof window.fbq === 'function') {
+        window.fbq('track', 'Purchase', {
+          value: purchaseValue,
+          currency: 'BRL',
+          content_name: purchaseValue === 197 ? 'Franquia / Pro' : purchaseValue === 97 ? 'Pack Delivery' : 'Purchase'
+        });
+        console.log('[Meta Pixel] Purchase event fired:', { value: purchaseValue, currency: 'BRL' });
+      }
+
+      // ══════════════════════════════════════════════════════════
+      // GA4: Fire purchase event (ecommerce)
+      // ══════════════════════════════════════════════════════════
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'purchase', {
+          value: purchaseValue,
+          currency: 'BRL',
+          transaction_id: `txn_${Date.now()}`,
+          items: [{
+            item_name: purchaseValue === 197 ? 'Franquia / Pro' : purchaseValue === 97 ? 'Pack Delivery' : 'Emprata Credits',
+            price: purchaseValue,
+            quantity: 1
+          }]
+        });
+        console.log('[GA4] purchase event fired:', { value: purchaseValue, currency: 'BRL' });
+      }
+
+      // ══════════════════════════════════════════════════════════
+      // CLEANUP: Remove from sessionStorage to prevent duplicate
+      // tracking on page refresh
+      // ══════════════════════════════════════════════════════════
+      sessionStorage.removeItem('purchase_intent_value');
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // CONFETTI ANIMATION
+    // ════════════════════════════════════════════════════════════════
     const duration = 3000;
     const animationEnd = Date.now() + duration;
     const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 0 };
@@ -22,7 +77,7 @@ export default function SuccessPage() {
       return Math.random() * (max - min) + min;
     }
 
-    const interval: any = setInterval(function() {
+    const interval: ReturnType<typeof setInterval> = setInterval(function() {
       const timeLeft = animationEnd - Date.now();
 
       if (timeLeft <= 0) {

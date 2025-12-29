@@ -1,33 +1,37 @@
-/**
- * LoginPage Component
- * Dedicated login page with same design as AuthModal
- */
-
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { AuthModal } from '../components/AuthModal';
 import { useAuth } from '../hooks/useAuth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { user, loading } = useAuth(); // Use 'user' directly instead of 'isAuthenticated' to be safer
 
-  // Redirect if already logged in
   useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/app');
+    // SECURITY CHECK: Only redirect if NOT loading and user EXISTS
+    if (!loading && user) {
+      console.log("✅ [LoginPage] User detected, redirecting to Dashboard...");
+      navigate('/dashboard', { replace: true });
     }
-  }, [isAuthenticated, navigate]);
+  }, [user, loading, navigate]);
+
+  // OPTIONAL: Show a spinner while deciding whether to redirect
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
 
   const handleSuccess = () => {
-    navigate('/app');
+    navigate('/dashboard', { replace: true });
   };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
-      {/* Header */}
       <header className="p-6">
         <button
           onClick={() => navigate('/')}
@@ -38,14 +42,12 @@ export default function LoginPage() {
         </button>
       </header>
 
-      {/* Content */}
       <div className="flex-1 flex items-center justify-center p-4">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md"
         >
-          {/* Logo */}
           <div className="text-center mb-8">
             <h1 className="text-5xl font-black italic tracking-ultra-tight mb-2">
               Emprata<span className="text-primary">.ai</span>
@@ -55,7 +57,6 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Auth Modal (Always Open) */}
           <AuthModal 
             isOpen={true} 
             onClose={() => navigate('/')}
@@ -63,8 +64,7 @@ export default function LoginPage() {
           />
         </motion.div>
       </div>
-
-      {/* Footer */}
+      
       <footer className="p-6 text-center">
         <p className="text-xs text-white/20 font-bold uppercase tracking-wider">
           © 2025 Emprata.ai • Todos os direitos reservados

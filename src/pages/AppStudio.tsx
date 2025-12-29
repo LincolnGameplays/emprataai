@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Camera, Download, RefreshCw, Share2, ChevronLeft, Lock, Coins,
-  Plus, Info, X, Zap, Box, MousePointer2, Utensils, Sparkles, Loader2, Aperture
+  Plus, Info, X, Zap, Box, MousePointer2, Utensils, Sparkles, Loader2, Aperture, RotateCcw
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ReactCompareSlider, ReactCompareSliderImage } from 'react-compare-slider';
@@ -343,16 +343,26 @@ export default function AppStudio() {
 
       {/* Mobile Header (Floating) */}
       <header className="md:hidden absolute top-0 left-0 right-0 z-50 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm">
-        <Link to="/" className="text-white/60 hover:text-white transition-colors">
+        <Link to="/dashboard" className="text-white/60 hover:text-white transition-colors">
           <ChevronLeft className="w-7 h-7" />
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div className="flex items-center gap-2 bg-black/60 backdrop-blur-xl px-3 py-1.5 rounded-full border border-white/10">
             <div className={`w-1.5 h-1.5 rounded-full ${store.credits > 0 ? 'bg-green-500' : 'bg-red-500'}`} />
             <span className="text-[10px] font-black uppercase tracking-wider text-white/80">
               {store.plan === 'PRO' ? '∞' : store.credits}
             </span>
           </div>
+          {/* Nova Foto Button (Mobile) */}
+          {store.originalImage && (
+            <button 
+              onClick={() => store.resetEditor()}
+              className="p-2 bg-white/5 hover:bg-white/10 rounded-full border border-white/10 transition-colors"
+              title="Nova Foto"
+            >
+              <RotateCcw className="w-4 h-4 text-white/60" />
+            </button>
+          )}
           {store.generatedImage && isImageLoaded && (
             <button 
               onClick={handleDownload}
@@ -372,7 +382,7 @@ export default function AppStudio() {
       {/* Desktop Header */}
       <header className="hidden md:flex h-20 w-full border-b border-white/5 items-center justify-between px-8 bg-[#0a0a0a]/80 backdrop-blur-3xl z-40 absolute top-0 left-0 right-0">
         <div className="flex items-center gap-6">
-          <Link to="/" className="text-white/40 hover:text-white transition-colors">
+          <Link to="/dashboard" className="text-white/40 hover:text-white transition-colors">
             <ChevronLeft className="w-8 h-8" />
           </Link>
           <div className="flex flex-col">
@@ -385,6 +395,17 @@ export default function AppStudio() {
 
         <div className="flex items-center gap-4">
           <UserDropdown />
+          
+          {/* Nova Foto Button (Desktop - Ghost Style) */}
+          {store.originalImage && (
+            <button 
+              onClick={() => store.resetEditor()}
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest border border-white/10 text-white/60 hover:text-white hover:border-white/20 hover:bg-white/5 transition-all"
+            >
+              <RotateCcw className="w-4 h-4" />
+              Nova Foto
+            </button>
+          )}
           
           <button 
             onClick={handleDownload}

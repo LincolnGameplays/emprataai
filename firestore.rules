@@ -4,35 +4,46 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // ============================================
-    // USERS COLLECTION - MILITARY GRADE SECURITY
+    // 1. USERS COLLECTION (Mantenha a segurança atual)
     // ============================================
     match /users/{userId} {
-      
-      // READ: Only authenticated users can read their OWN document
       allow read: if request.auth != null && request.auth.uid == userId;
-      
-      // CREATE: Only authenticated users can create their OWN document
-      // This is needed for initial signup flow
       allow create: if request.auth != null && request.auth.uid == userId;
       
-      // UPDATE: Only authenticated users can update their OWN document
-      // BUT they CANNOT modify protected fields: credits, plan, subscriptionRenewsAt
-      // These fields can ONLY be modified by Backend (Admin SDK) via Cloud Functions
+      // Bloqueia edição de campos sensíveis (créditos/plano) pelo front-end
       allow update: if request.auth != null 
                     && request.auth.uid == userId
                     && !request.resource.data.diff(resource.data)
                        .affectedKeys()
                        .hasAny(['credits', 'plan', 'subscriptionRenewsAt']);
-      
-      // DELETE: Never allowed from frontend
-      allow delete: if false;
     }
-    
+
     // ============================================
-    // DEFAULT: DENY ALL OTHER ACCESS
+    // 2. MENUS COLLECTION (Cardápio Digital)
     // ============================================
-    match /{document=**} {
-      allow read, write: if false;
+    match /menus/{menuId} {
+      // PÚBLICO: Qualquer pessoa (mesmo sem login) pode ver o cardápio
+      allow read: if true;
+      
+      // CRIAÇÃO: Só usuário logado pode criar, e deve ser dono do menu
+      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
+      
+      // EDIÇÃO: Apenas o dono pode editar ou deletar
+      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ============================================
+    // 3. ORDERS COLLECTION (Pedidos do Cardápio)
+    // ============================================
+    match /orders/{orderId} {
+      // CRIAÇÃO: Qualquer cliente (público) pode enviar um pedido
+      allow create: if true; 
+      
+      // LEITURA: Apenas o dono do restaurante vê os pedidos dele (Dashboard)
+      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      
+      // EDIÇÃO: Apenas o dono pode mudar status (ex: 'pending' -> 'paid')
+      allow update: if request.auth != null && resource.data.ownerId == request.auth.uid;
     }
   }
 }
