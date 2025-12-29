@@ -6,11 +6,21 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import {defineString} from "firebase-functions/params";
+import * as cors from "cors";
 
 // Initialize Firebase Admin SDK
 admin.initializeApp();
 
 const db = admin.firestore();
+
+// Configuração de CORS para aceitar Localhost e Vercel
+const corsHandler = cors({ 
+  origin: [
+    "http://localhost:5173", 
+    "https://emprataai.vercel.app", // Domínio da Vercel
+    "https://emprata-ai.web.app"
+  ] 
+});
 
 // ============================================================================
 // ENVIRONMENT VARIABLES

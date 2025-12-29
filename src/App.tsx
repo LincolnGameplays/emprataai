@@ -1,5 +1,5 @@
 /**
- * Emprata.ai Routes v4.0 - App Shell Layout
+ * Emprata.ai Routes v5.0 - Tools Hub Edition
  */
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
@@ -15,6 +15,7 @@ import Dashboard from './pages/Dashboard';
 import MenuBuilder from './pages/MenuBuilder';
 import PublicMenu from './pages/PublicMenu';
 import KitchenDisplay from './pages/KitchenDisplay';
+import QrPrint from './pages/QrPrint';
 import StaffManagement from './pages/StaffManagement';
 import WaiterLogin from './pages/WaiterLogin';
 import WaiterApp from './pages/WaiterApp';
@@ -23,9 +24,15 @@ import SuccessPage from './pages/SuccessPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import NotFoundPage from './pages/NotFoundPage';
+import ToolsHub from './pages/ToolsHub';
+import WhatsappTool from './pages/WhatsappTool';
+import DispatchConsole from './pages/DispatchConsole';
+import DriverApp from './pages/DriverApp';
+import DeliveryTracking from './pages/DeliveryTracking';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
+import NetworkStatus from './components/NetworkStatus';
 
 export default function App() {
   return (
@@ -53,6 +60,9 @@ export default function App() {
         
         {/* Cardápio Público */}
         <Route path="/menu/:slug" element={<PublicMenu />} />
+        
+        {/* Delivery Tracking (Public) */}
+        <Route path="/track/:orderId" element={<DeliveryTracking />} />
 
         {/* ══════════════════════════════════════════════════════════ */}
         {/* WAITER MODE (Layout Próprio) */}
@@ -64,6 +74,7 @@ export default function App() {
         {/* KITCHEN DISPLAY SYSTEM (Fullscreen) */}
         {/* ══════════════════════════════════════════════════════════ */}
         <Route path="/kitchen/:restaurantId" element={<KitchenDisplay />} />
+        <Route path="/kitchen-mode" element={<KitchenDisplay />} />
 
         {/* ══════════════════════════════════════════════════════════ */}
         {/* ÁREA LOGADA COM APP LAYOUT */}
@@ -89,7 +100,24 @@ export default function App() {
           
           {/* Sucesso Pagamento */}
           <Route path="/success" element={<SuccessPage />} />
+          
+          {/* QR Print Studio */}
+          <Route path="/print-qr" element={<QrPrint />} />
+          
+          {/* Tools Hub - Central de Ferramentas */}
+          <Route path="/tools" element={<ToolsHub />} />
+          
+          {/* WhatsApp Tool */}
+          <Route path="/tools/whatsapp" element={<WhatsappTool />} />
+          
+          {/* Logistics Dispatch Console */}
+          <Route path="/logistics/dispatch" element={<DispatchConsole />} />
         </Route>
+
+        {/* ══════════════════════════════════════════════════════════ */}
+        {/* DRIVER MODE (Fullscreen - Sem AppLayout) */}
+        {/* ══════════════════════════════════════════════════════════ */}
+        <Route path="/driver-mode" element={<DriverApp />} />
 
         {/* ══════════════════════════════════════════════════════════ */}
         {/* STUDIO (Fullscreen - Sem AppLayout) */}

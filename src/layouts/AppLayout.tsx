@@ -13,6 +13,8 @@ import {
 
 import { useAuth } from '../hooks/useAuth';
 import { UserDropdown } from '../components/UserDropdown';
+import OnboardingTour from '../components/OnboardingTour';
+import SmartHelp from '../components/SmartHelp';
 
 // ══════════════════════════════════════════════════════════════════
 // NAVIGATION CONFIG
@@ -229,6 +231,17 @@ export default function AppLayout() {
 
       {/* Mobile Bottom Bar */}
       <BottomBar items={filteredNavItems} />
+
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* GLOBAL WIDGETS */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      
+      {/* Onboarding Tour (runs on first visit) */}
+      <OnboardingTour />
+      
+      {/* Smart Help Widget (floating ? button) */}
+      <SmartHelp />
     </div>
   );
 }
+

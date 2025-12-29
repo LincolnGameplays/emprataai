@@ -3,12 +3,13 @@
  * Real-time order management for kitchen staff
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Clock, ChefHat, CheckCircle, AlertTriangle, 
-  Volume2, VolumeX, RefreshCw, Users
+  Volume2, VolumeX, RefreshCw, Users, Package,
+  Flame, ChevronRight
 } from 'lucide-react';
 import { 
   collection, 
@@ -24,6 +25,8 @@ import { db } from '../config/firebase';
 import { formatDistanceToNow } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import type { Order, OrderStatus } from '../types/orders';
+import VoiceControl from '../components/kds/VoiceControl';
+import { toast } from 'sonner';
 
 // ══════════════════════════════════════════════════════════════════
 // STATUS CONFIG
@@ -33,9 +36,11 @@ const STATUS_CONFIG: Record<OrderStatus, { color: string; bg: string; label: str
   pending: { color: 'text-yellow-400', bg: 'bg-yellow-500/20 border-yellow-500/50', label: 'PENDENTE' },
   preparing: { color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500/50', label: 'PREPARANDO' },
   ready: { color: 'text-green-400', bg: 'bg-green-500/20 border-green-500/50', label: 'PRONTO' },
+  dispatched: { color: 'text-purple-400', bg: 'bg-purple-500/20 border-purple-500/50', label: 'ENVIADO' },
   delivered: { color: 'text-gray-400', bg: 'bg-gray-500/20 border-gray-500/50', label: 'ENTREGUE' },
   billing_requested: { color: 'text-red-400', bg: 'bg-red-500/20 border-red-500/50', label: '💳 CONTA' },
-  closed: { color: 'text-gray-600', bg: 'bg-gray-800/50 border-gray-600/50', label: 'FECHADO' }
+  closed: { color: 'text-gray-600', bg: 'bg-gray-800/50 border-gray-600/50', label: 'FECHADO' },
+  cancelled: { color: 'text-gray-600', bg: 'bg-gray-800/50 border-gray-600/50', label: 'CANCELADO' }
 };
 
 const STATUS_FLOW: OrderStatus[] = ['pending', 'preparing', 'ready', 'delivered'];
@@ -57,6 +62,103 @@ function getMinutesSince(timestamp: any): number {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// PRODUCTION SUMMARY COMPONENT
+// ══════════════════════════════════════════════════════════════════
+
+interface ProductionSummaryProps {
+  orders: Order[];
+}
+
+function ProductionSummary({ orders }: ProductionSummaryProps) {
+  // Aggregate items from pending and preparing orders
+  const aggregatedItems = useMemo(() => {
+    const itemMap = new Map<string, { name: string; quantity: number; image?: string }>();
+    
+    orders
+      .filter(o => o.status === 'pending' || o.status === 'preparing')
+      .forEach(order => {
+        order.items.forEach(item => {
+          const existing = itemMap.get(item.name);
+          if (existing) {
+            existing.quantity += item.quantity;
+          } else {
+            itemMap.set(item.name, {
+              name: item.name,
+              quantity: item.quantity,
+              image: item.image
+            });
+          }
+        });
+      });
+    
+    // Sort by quantity (highest first)
+    return Array.from(itemMap.values()).sort((a, b) => b.quantity - a.quantity);
+  }, [orders]);
+
+  if (aggregatedItems.length === 0) return null;
+
+  const totalItems = aggregatedItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      className="bg-gradient-to-br from-orange-500/10 to-red-500/5 border border-orange-500/30 rounded-2xl p-4"
+    >
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-8 h-8 bg-orange-500/20 rounded-lg flex items-center justify-center">
+          <Flame className="w-4 h-4 text-orange-400" />
+        </div>
+        <div>
+          <h3 className="font-black text-sm uppercase">Resumo da Chapa</h3>
+          <p className="text-[10px] text-white/40">{totalItems} itens na fila</p>
+        </div>
+      </div>
+
+      {/* Aggregated Items */}
+      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+        {aggregatedItems.map((item, index) => (
+          <motion.div
+            key={item.name}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.05 }}
+            className="flex items-center gap-3 p-3 bg-black/30 rounded-xl"
+          >
+            {/* Quantity Badge */}
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl ${
+              item.quantity >= 5 ? 'bg-red-500/30 text-red-400' :
+              item.quantity >= 3 ? 'bg-yellow-500/30 text-yellow-400' :
+              'bg-white/10 text-white'
+            }`}>
+              {item.quantity}x
+            </div>
+            
+            {/* Item Name */}
+            <span className="font-bold text-sm flex-1 truncate">{item.name}</span>
+            
+            {/* Priority Indicator */}
+            {item.quantity >= 5 && (
+              <span className="px-2 py-1 bg-red-500/20 text-red-400 text-[10px] font-bold rounded-full uppercase">
+                Urgente
+              </span>
+            )}
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Footer Tip */}
+      <div className="mt-4 pt-3 border-t border-white/10 text-center">
+        <p className="text-[10px] text-white/30">
+          💡 Produza em lote para maior eficiência
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // ORDER CARD COMPONENT
 // ══════════════════════════════════════════════════════════════════
 
@@ -69,8 +171,22 @@ interface OrderCardProps {
 function OrderCard({ order, onAdvanceStatus, onShowDetails }: OrderCardProps) {
   const config = STATUS_CONFIG[order.status];
   const minutes = getMinutesSince(order.createdAt);
-  const isUrgent = minutes > 10 && order.status === 'pending';
   const isBillingRequested = order.status === 'billing_requested';
+
+  // Delay-based border colors
+  const getDelayBorder = () => {
+    if (order.status === 'delivered' || order.status === 'closed') return '';
+    if (minutes > 20) return 'border-red-500 ring-2 ring-red-500/50 animate-pulse';
+    if (minutes > 10) return 'border-yellow-500';
+    return 'border-green-500';
+  };
+
+  // Call waiter handler
+  const handleCallWaiter = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    console.log(`🔔 [WAITER CALL] Pedido #${order.id?.slice(-4).toUpperCase()} está PRONTO para entrega na Mesa ${order.customer?.table || 'N/A'}`);
+    alert(`Garçom notificado! Pedido #${order.id?.slice(-4).toUpperCase()} pronto para entrega.`);
+  };
 
   return (
     <motion.div
@@ -80,8 +196,8 @@ function OrderCard({ order, onAdvanceStatus, onShowDetails }: OrderCardProps) {
       exit={{ opacity: 0, scale: 0.9 }}
       className={`
         ${config.bg} border-2 rounded-2xl p-4 cursor-pointer select-none
-        ${isUrgent ? 'animate-pulse border-yellow-500' : ''}
-        ${isBillingRequested ? 'border-red-500 ring-2 ring-red-500/50' : ''}
+        ${getDelayBorder()}
+        ${isBillingRequested ? 'ring-2 ring-red-500/50' : ''}
         hover:scale-[1.02] transition-transform
       `}
       onClick={onAdvanceStatus}
@@ -91,7 +207,7 @@ function OrderCard({ order, onAdvanceStatus, onShowDetails }: OrderCardProps) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <span className="text-3xl font-black text-white">
-            #{order.orderNumber || '?'}
+            #{order.id?.slice(-4).toUpperCase() || '?'}
           </span>
           {order.customer?.table && (
             <span className="px-2 py-1 bg-white/10 rounded-lg text-xs font-bold uppercase">
@@ -117,7 +233,7 @@ function OrderCard({ order, onAdvanceStatus, onShowDetails }: OrderCardProps) {
         {order.items.slice(0, 4).map((item, i) => (
           <div 
             key={i} 
-            className={`flex justify-between text-sm ${item.status === 'done' ? 'line-through opacity-50' : ''}`}
+            className="flex justify-between text-sm"
           >
             <span className="font-bold text-white">
               {item.quantity}x {item.name}
@@ -136,14 +252,26 @@ function OrderCard({ order, onAdvanceStatus, onShowDetails }: OrderCardProps) {
 
       {/* Footer */}
       <div className="flex items-center justify-between pt-3 border-t border-white/10">
-        <div className={`flex items-center gap-1 text-xs font-bold ${isUrgent ? 'text-red-400' : 'text-white/40'}`}>
+        <div className={`flex items-center gap-1 text-xs font-bold ${
+          minutes > 20 ? 'text-red-400' : minutes > 10 ? 'text-yellow-400' : 'text-green-400'
+        }`}>
           <Clock className="w-3 h-3" />
-          {getTimeAgo(order.createdAt)}
+          {minutes} min
         </div>
         <span className="text-lg font-black text-primary">
           R$ {order.total.toFixed(2).replace('.', ',')}
         </span>
       </div>
+
+      {/* Call Waiter Button (only for ready orders) */}
+      {order.status === 'ready' && (
+        <button
+          onClick={handleCallWaiter}
+          className="w-full mt-3 py-2 bg-green-500 hover:bg-green-600 rounded-xl text-sm font-black uppercase tracking-wider transition-colors"
+        >
+          🔔 Chamar Garçom
+        </button>
+      )}
     </motion.div>
   );
 }
@@ -157,6 +285,7 @@ export default function KitchenDisplay() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [showSummary, setShowSummary] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Subscribe to real-time orders
@@ -223,6 +352,31 @@ export default function KitchenDisplay() {
   const readyOrders = orders.filter(o => o.status === 'ready');
   const billingOrders = orders.filter(o => o.status === 'billing_requested');
 
+  // Voice command: Complete order by short ID
+  const handleVoiceComplete = async (orderShortId: string) => {
+    const order = orders.find(o => 
+      o.id?.slice(-4).toUpperCase() === orderShortId.toUpperCase() ||
+      o.id?.slice(-6).toUpperCase() === orderShortId.toUpperCase()
+    );
+    
+    if (order) {
+      await updateDoc(doc(db, 'orders', order.id), {
+        status: 'ready',
+        updatedAt: Timestamp.now()
+      });
+      toast.success(`✅ Pedido #${orderShortId} marcado como PRONTO!`);
+    } else {
+      toast.error(`Pedido ${orderShortId} não encontrado`);
+    }
+  };
+
+  // Voice command: Call waiter
+  const handleVoiceCallWaiter = () => {
+    toast.success('🔔 Garçom foi notificado!', { duration: 3000 });
+    // Could integrate with PulseContext here
+    console.log('[VOICE] Waiter called from KDS');
+  };
+
   return (
     <div className="min-h-screen bg-black text-white p-4 md:p-6">
       {/* Audio element for notifications */}
@@ -256,6 +410,15 @@ export default function KitchenDisplay() {
               </span>
             </div>
           )}
+
+          {/* Toggle Summary */}
+          <button 
+            onClick={() => setShowSummary(!showSummary)}
+            className={`p-3 rounded-xl transition-colors ${showSummary ? 'bg-orange-500/20 text-orange-400' : 'bg-white/10'}`}
+            title="Resumo da Produção"
+          >
+            <Package className="w-6 h-6" />
+          </button>
 
           {/* Sound Toggle */}
           <button 
@@ -301,85 +464,102 @@ export default function KitchenDisplay() {
         </section>
       )}
 
-      {/* Kanban Columns */}
-      <div className="grid md:grid-cols-3 gap-6">
-        {/* Pending Column */}
-        <section>
-          <h2 className="text-sm font-black uppercase tracking-widest text-yellow-400 mb-3 flex items-center gap-2">
-            <Clock className="w-4 h-4" />
-            PENDENTES ({pendingOrders.length})
-          </h2>
-          <div className="space-y-4">
-            <AnimatePresence>
-              {pendingOrders.map(order => (
-                <OrderCard 
-                  key={order.id}
-                  order={order}
-                  onAdvanceStatus={() => advanceStatus(order)}
-                  onShowDetails={() => setSelectedOrder(order)}
-                />
-              ))}
-            </AnimatePresence>
-            {pendingOrders.length === 0 && (
-              <div className="text-center py-12 text-white/20">
-                <CheckCircle className="w-12 h-12 mx-auto mb-2" />
-                <p className="text-sm font-bold">Nenhum pendente</p>
-              </div>
-            )}
-          </div>
-        </section>
+      {/* Main Layout with Production Summary */}
+      <div className="flex gap-6">
+        {/* Production Summary Sidebar */}
+        <AnimatePresence>
+          {showSummary && (
+            <motion.div
+              initial={{ opacity: 0, width: 0 }}
+              animate={{ opacity: 1, width: 280 }}
+              exit={{ opacity: 0, width: 0 }}
+              className="hidden lg:block shrink-0"
+            >
+              <ProductionSummary orders={orders} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Preparing Column */}
-        <section>
-          <h2 className="text-sm font-black uppercase tracking-widest text-blue-400 mb-3 flex items-center gap-2">
-            <ChefHat className="w-4 h-4" />
-            PREPARANDO ({preparingOrders.length})
-          </h2>
-          <div className="space-y-4">
-            <AnimatePresence>
-              {preparingOrders.map(order => (
-                <OrderCard 
-                  key={order.id}
-                  order={order}
-                  onAdvanceStatus={() => advanceStatus(order)}
-                  onShowDetails={() => setSelectedOrder(order)}
-                />
-              ))}
-            </AnimatePresence>
-            {preparingOrders.length === 0 && (
-              <div className="text-center py-12 text-white/20">
-                <ChefHat className="w-12 h-12 mx-auto mb-2" />
-                <p className="text-sm font-bold">Nenhum em preparo</p>
-              </div>
-            )}
-          </div>
-        </section>
+        {/* Kanban Columns */}
+        <div className="flex-1 grid md:grid-cols-3 gap-6">
+          {/* Pending Column */}
+          <section>
+            <h2 className="text-sm font-black uppercase tracking-widest text-yellow-400 mb-3 flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              PENDENTES ({pendingOrders.length})
+            </h2>
+            <div className="space-y-4">
+              <AnimatePresence>
+                {pendingOrders.map(order => (
+                  <OrderCard 
+                    key={order.id}
+                    order={order}
+                    onAdvanceStatus={() => advanceStatus(order)}
+                    onShowDetails={() => setSelectedOrder(order)}
+                  />
+                ))}
+              </AnimatePresence>
+              {pendingOrders.length === 0 && (
+                <div className="text-center py-12 text-white/20">
+                  <CheckCircle className="w-12 h-12 mx-auto mb-2" />
+                  <p className="text-sm font-bold">Nenhum pendente</p>
+                </div>
+              )}
+            </div>
+          </section>
 
-        {/* Ready Column */}
-        <section>
-          <h2 className="text-sm font-black uppercase tracking-widest text-green-400 mb-3 flex items-center gap-2">
-            <CheckCircle className="w-4 h-4" />
-            PRONTOS ({readyOrders.length})
-          </h2>
-          <div className="space-y-4">
-            <AnimatePresence>
-              {readyOrders.map(order => (
-                <OrderCard 
-                  key={order.id}
-                  order={order}
-                  onAdvanceStatus={() => advanceStatus(order)}
-                  onShowDetails={() => setSelectedOrder(order)}
-                />
-              ))}
-            </AnimatePresence>
-            {readyOrders.length === 0 && (
-              <div className="text-center py-12 text-white/20">
-                <CheckCircle className="w-12 h-12 mx-auto mb-2" />
-                <p className="text-sm font-bold">Nenhum pronto</p>
-              </div>
-            )}
-          </div>
-        </section>
+          {/* Preparing Column */}
+          <section>
+            <h2 className="text-sm font-black uppercase tracking-widest text-blue-400 mb-3 flex items-center gap-2">
+              <ChefHat className="w-4 h-4" />
+              PREPARANDO ({preparingOrders.length})
+            </h2>
+            <div className="space-y-4">
+              <AnimatePresence>
+                {preparingOrders.map(order => (
+                  <OrderCard 
+                    key={order.id}
+                    order={order}
+                    onAdvanceStatus={() => advanceStatus(order)}
+                    onShowDetails={() => setSelectedOrder(order)}
+                  />
+                ))}
+              </AnimatePresence>
+              {preparingOrders.length === 0 && (
+                <div className="text-center py-12 text-white/20">
+                  <ChefHat className="w-12 h-12 mx-auto mb-2" />
+                  <p className="text-sm font-bold">Nenhum em preparo</p>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Ready Column */}
+          <section>
+            <h2 className="text-sm font-black uppercase tracking-widest text-green-400 mb-3 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              PRONTOS ({readyOrders.length})
+            </h2>
+            <div className="space-y-4">
+              <AnimatePresence>
+                {readyOrders.map(order => (
+                  <OrderCard 
+                    key={order.id}
+                    order={order}
+                    onAdvanceStatus={() => advanceStatus(order)}
+                    onShowDetails={() => setSelectedOrder(order)}
+                  />
+                ))}
+              </AnimatePresence>
+              {readyOrders.length === 0 && (
+                <div className="text-center py-12 text-white/20">
+                  <CheckCircle className="w-12 h-12 mx-auto mb-2" />
+                  <p className="text-sm font-bold">Nenhum pronto</p>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
 
       {/* Order Details Modal */}
@@ -400,7 +580,7 @@ export default function KitchenDisplay() {
               onClick={e => e.stopPropagation()}
             >
               <h3 className="text-3xl font-black mb-4">
-                Pedido #{selectedOrder.orderNumber}
+                Pedido #{selectedOrder.id?.slice(-4).toUpperCase()}
               </h3>
               
               <div className="mb-4 p-4 bg-white/5 rounded-xl">
@@ -421,7 +601,7 @@ export default function KitchenDisplay() {
                       )}
                     </div>
                     <span className="text-primary font-bold">
-                      R$ {item.totalPrice.toFixed(2)}
+                      R$ {(item.price * item.quantity).toFixed(2)}
                     </span>
                   </div>
                 ))}
@@ -444,6 +624,26 @@ export default function KitchenDisplay() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Voice Control */}
+      <VoiceControl 
+        onCompleteOrder={handleVoiceComplete}
+        onCallWaiter={handleVoiceCallWaiter}
+      />
     </div>
   );
 }
+
+// ══════════════════════════════════════════════════════════════════
+// VOICE CONTROL WRAPPER
+// ══════════════════════════════════════════════════════════════════
+
+function KitchenDisplayWithVoice() {
+  return <KitchenDisplayContent />;
+}
+
+function KitchenDisplayContent() {
+  // Get orders from parent or use hook
+  return <KitchenDisplay />;
+}
+

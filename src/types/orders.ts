@@ -1,154 +1,58 @@
-/**
- * Order Types for Order Ecosystem 2.0
- * Complete order management with customer tracking
- */
-
-// ══════════════════════════════════════════════════════════════════
-// ORDER STATUS
-// ══════════════════════════════════════════════════════════════════
-
-export type OrderStatus = 
-  | 'pending'           // Recebido, aguardando preparo
-  | 'preparing'         // Em preparo na cozinha
-  | 'ready'             // Pronto para entrega
-  | 'delivered'         // Entregue ao cliente
-  | 'billing_requested' // Cliente pediu a conta
-  | 'closed';           // Pago e finalizado
-
-export type ItemStatus = 'pending' | 'done';
-
-// ══════════════════════════════════════════════════════════════════
-// CUSTOMER
-// ══════════════════════════════════════════════════════════════════
+export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'dispatched' | 'delivered' | 'billing_requested' | 'closed' | 'cancelled';
 
 export interface Customer {
   name: string;
-  cpf: string;          // Formato 000.000.000-00
-  table?: string;       // Mesa (opcional)
-  phone?: string;       // WhatsApp (opcional)
+  cpf: string; // Formato 000.000.000-00
+  phone?: string;
+  table?: string;
+  // Delivery address (optional for dine-in)
+  address?: {
+    street: string;
+    number: string;
+    complement?: string;
+    neighborhood: string;
+    city: string;
+    zipCode?: string;
+    reference?: string;
+  };
 }
 
-// ══════════════════════════════════════════════════════════════════
-// ORDER ITEM
-// ══════════════════════════════════════════════════════════════════
-
 export interface OrderItem {
-  id: string;
+  id: string; // ID único do item no pedido (uuid)
   menuItemId: string;
   name: string;
   quantity: number;
-  unitPrice: number;
-  totalPrice: number;
-  imageUrl?: string;
+  price: number;
   notes?: string;
-  status: ItemStatus;   // Controle individual na cozinha
+  image?: string;
 }
-
-// ══════════════════════════════════════════════════════════════════
-// ORDER
-// ══════════════════════════════════════════════════════════════════
 
 export interface Order {
   id: string;
-  restaurantId: string;
-  ownerId: string;             // Restaurant owner UID
-  
-  // Customer Data
+  restaurantId: string; // Owner ID
   customer: Customer;
-  
-  // Order Details
   items: OrderItem[];
   subtotal: number;
-  deliveryFee: number;
   total: number;
-  
-  // Status & Tracking
   status: OrderStatus;
-  orderNumber: number;         // Sequential number for the day
-  isPaid: boolean;             // Payment status for analytics
+  createdAt: any; // Firestore Timestamp
+  paymentMethod: 'pix' | 'credit' | 'debit' | 'cash';
+  isOrderBumpAccepted: boolean; // Se aceitou a sugestão da IA
   
-  // Waiter Attribution
-  waiterId?: string;           // ID do garçom que lançou
-  waiterName?: string;         // Nome do garçom
-  tableNumber?: number;        // Número da mesa
+  // ══════════════════════════════════════════════════════════════════
+  // LOGISTICS FIELDS
+  // ══════════════════════════════════════════════════════════════════
+  driverId?: string; // Assigned driver
+  driverName?: string; // Denormalized for display
+  deliveryFee?: number; // Fee paid to driver
+  dispatchedAt?: any; // When driver left with order
+  deliveredAt?: any; // When delivery confirmed
   
-  // Analytics
-  isOrderBumpAccepted: boolean;
-  orderBumpItem?: string;
-  
-  // Delivery
-  deliveryType: 'dine_in' | 'takeaway' | 'delivery';
-  deliveryAddress?: string;
-  
-  // Timestamps
-  createdAt: any;              // Firestore Timestamp
-  updatedAt: any;
-  completedAt?: any;
-  billingRequestedAt?: any;
+  // ══════════════════════════════════════════════════════════════════
+  // SECURITY PIN PROTOCOL
+  // ══════════════════════════════════════════════════════════════════
+  deliveryPin?: string; // 4-digit code for customer verification
+  deliveryProofUrl?: string; // Photo proof if left at doorstep/portaria
+  deliveryAttemptCoords?: { lat: number; lng: number }; // GPS at delivery
 }
 
-// ══════════════════════════════════════════════════════════════════
-// CART (Client-side state)
-// ══════════════════════════════════════════════════════════════════
-
-export interface CartItem {
-  menuItemId: string;
-  name: string;
-  price: number;
-  quantity: number;
-  imageUrl?: string;
-  notes?: string;
-}
-
-export interface Cart {
-  items: CartItem[];
-  total: number;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// ORDER BUMP SUGGESTION (From AI)
-// ══════════════════════════════════════════════════════════════════
-
-export interface OrderBumpSuggestion {
-  itemName: string;
-  reason: string;
-  suggestedPrice: number;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// DASHBOARD METRICS
-// ══════════════════════════════════════════════════════════════════
-
-export interface DashboardMetrics {
-  totalRevenue: number;
-  todayRevenue: number;
-  activeOrders: number;
-  totalOrders: number;
-  averageTicket: number;
-  conversionRate: number;
-  dailySales: { date: string; value: number }[];
-  topItems: { name: string; quantity: number; image: string }[];
-  recentOrders: Order[];
-  
-  // Comparison with previous period
-  revenueChange: number;
-  ordersChange: number;
-  ticketChange: number;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// AI ORGANIZE RESPONSE
-// ══════════════════════════════════════════════════════════════════
-
-export interface AISmartOrganizeResponse {
-  categories: {
-    name: string;
-    items: string[];
-  }[];
-  suggestedHighlights: string[];
-  orderBumps: OrderBumpSuggestion[];
-  improvedDescriptions: {
-    itemName: string;
-    newDescription: string;
-  }[];
-}
