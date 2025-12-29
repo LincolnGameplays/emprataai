@@ -12,8 +12,8 @@ import {
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { functions, db } from '../config/firebase';
-import { useAuth } from '../hooks/useAuth';
+import { functions, db } from '../../config/firebase';
+import { useAuth } from '../../hooks/useAuth';
 import { IMaskInput } from 'react-imask';
 
 // ══════════════════════════════════════════════════════════════════
