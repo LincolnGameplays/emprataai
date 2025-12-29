@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles } from 'lucide-react';
+import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles, CloudRain, Dumbbell, Zap, Moon } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 import { collection, query, where, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -9,6 +9,7 @@ import { Loading } from '../components/Loading';
 import { toast } from 'sonner';
 import { IMaskInput } from 'react-imask';
 import SocialProofTicker from '../components/SocialProofTicker';
+import { rewriteDescription, UserVibe, VIBE_METADATA } from '../services/neuroCopy';
 
 // Interfaces simplificadas para o componente
 interface MenuItem {
@@ -52,8 +53,35 @@ export default function PublicMenu() {
   // Order Success State (with delivery PIN)
   const [orderSuccess, setOrderSuccess] = useState<OrderSuccess | null>(null);
   
+  // Neuro-Copywriting State
+  const [currentVibe, setCurrentVibe] = useState<UserVibe>('standard');
+  const [optimizedDescriptions, setOptimizedDescriptions] = useState<Record<string, string>>({});
+  
   // Deep Link handler - prevent double-trigger
   const deepLinkProcessed = useRef(false);
+
+  // Neuro-Copywriting Effect
+  useEffect(() => {
+    if (currentVibe === 'standard') {
+      setOptimizedDescriptions({});
+      return;
+    }
+
+    const optimizeMenu = async () => {
+      const itemsToOptimize = menuItems.slice(0, 10);
+
+      for (const item of itemsToOptimize) {
+        // Loading placeholder
+        setOptimizedDescriptions(prev => ({ ...prev, [item.id]: '✨ Personalizando...' }));
+        
+        // Actual AI rewrite
+        const newText = await rewriteDescription(item.title, item.description, currentVibe);
+        setOptimizedDescriptions(prev => ({ ...prev, [item.id]: newText }));
+      }
+    };
+
+    optimizeMenu();
+  }, [currentVibe, menuItems]);
 
   // Carregar Dados
   useEffect(() => {
@@ -243,6 +271,46 @@ export default function PublicMenu() {
         </div>
       </div>
 
+      {/* NEURO-COPYWRITING VIBE SELECTOR */}
+      <div className="bg-[#121212] py-6 px-4 border-b border-white/5">
+        <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-3 text-center">
+          Como você está se sentindo hoje?
+        </p>
+        <div className="flex justify-center gap-3 overflow-x-auto pb-2 no-scrollbar">
+          <button 
+            onClick={() => setCurrentVibe('comfort')} 
+            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'comfort' ? 'bg-white/10 border-blue-500 text-white' : 'border-white/10 text-white/40'}`}
+          >
+            <CloudRain className="w-5 h-5" />
+            <span className="text-[10px] font-bold">Frio/Chuva</span>
+          </button>
+
+          <button 
+            onClick={() => setCurrentVibe('fitness')} 
+            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'fitness' ? 'bg-white/10 border-green-500 text-white' : 'border-white/10 text-white/40'}`}
+          >
+            <Dumbbell className="w-5 h-5" />
+            <span className="text-[10px] font-bold">Fitness</span>
+          </button>
+
+          <button 
+            onClick={() => setCurrentVibe('energy')} 
+            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'energy' ? 'bg-white/10 border-orange-500 text-white' : 'border-white/10 text-white/40'}`}
+          >
+            <Zap className="w-5 h-5" />
+            <span className="text-[10px] font-bold">Fome Monstro</span>
+          </button>
+
+          <button 
+            onClick={() => setCurrentVibe('late_night')} 
+            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'late_night' ? 'bg-white/10 border-purple-500 text-white' : 'border-white/10 text-white/40'}`}
+          >
+            <Moon className="w-5 h-5" />
+            <span className="text-[10px] font-bold">Larica</span>
+          </button>
+        </div>
+      </div>
+
       {/* GRID DE ITENS (BENTO STYLE) */}
       <div className="max-w-4xl mx-auto p-6 grid md:grid-cols-2 gap-6">
         {menuItems
@@ -266,7 +334,9 @@ export default function PublicMenu() {
                   <h3 className="font-bold text-lg leading-tight mb-1">{item.title}</h3>
                   <span className="text-primary font-black">R$ {item.price.toFixed(2)}</span>
                 </div>
-                <p className="text-xs text-white/40 line-clamp-2">{item.description}</p>
+                <p className={`text-xs leading-relaxed line-clamp-2 transition-all duration-300 ${optimizedDescriptions[item.id] ? 'text-primary/80' : 'text-white/40'}`}>
+                  {optimizedDescriptions[item.id] || item.description}
+                </p>
               </div>
               
               <button className="mt-2 w-full py-2 bg-white/5 rounded-xl text-xs font-bold uppercase hover:bg-primary hover:text-white transition-colors flex items-center justify-center gap-2">

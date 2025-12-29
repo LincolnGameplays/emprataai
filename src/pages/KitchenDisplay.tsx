@@ -352,29 +352,28 @@ export default function KitchenDisplay() {
   const readyOrders = orders.filter(o => o.status === 'ready');
   const billingOrders = orders.filter(o => o.status === 'billing_requested');
 
-  // Voice command: Complete order by short ID
-  const handleVoiceComplete = async (orderShortId: string) => {
-    const order = orders.find(o => 
-      o.id?.slice(-4).toUpperCase() === orderShortId.toUpperCase() ||
-      o.id?.slice(-6).toUpperCase() === orderShortId.toUpperCase()
-    );
-    
-    if (order) {
-      await updateDoc(doc(db, 'orders', order.id), {
-        status: 'ready',
-        updatedAt: Timestamp.now()
-      });
-      toast.success(`✅ Pedido #${orderShortId} marcado como PRONTO!`);
-    } else {
-      toast.error(`Pedido ${orderShortId} não encontrado`);
+  // Voice command handler (unified interface)
+  const handleVoiceCommand = async (command: string, value: string) => {
+    if (command === 'ready') {
+      // Find order by number (last 2-4 digits of ID or orderNumber)
+      const order = orders.find(o => 
+        o.id?.slice(-4).toUpperCase().includes(value.toUpperCase()) ||
+        o.id?.slice(-2) === value ||
+        String(o.id).includes(value)
+      );
+      
+      if (order) {
+        await updateDoc(doc(db, 'orders', order.id), {
+          status: 'ready',
+          updatedAt: Timestamp.now()
+        });
+      } else {
+        toast.error(`Pedido ${value} não encontrado`);
+      }
+    } else if (command === 'call_waiter') {
+      toast.success('🔔 Garçom foi notificado!', { duration: 3000 });
+      console.log('[VOICE] Waiter called from KDS');
     }
-  };
-
-  // Voice command: Call waiter
-  const handleVoiceCallWaiter = () => {
-    toast.success('🔔 Garçom foi notificado!', { duration: 3000 });
-    // Could integrate with PulseContext here
-    console.log('[VOICE] Waiter called from KDS');
   };
 
   return (
@@ -626,10 +625,7 @@ export default function KitchenDisplay() {
       </AnimatePresence>
 
       {/* Voice Control */}
-      <VoiceControl 
-        onCompleteOrder={handleVoiceComplete}
-        onCallWaiter={handleVoiceCallWaiter}
-      />
+      <VoiceControl onCommand={handleVoiceCommand} />
     </div>
   );
 }
