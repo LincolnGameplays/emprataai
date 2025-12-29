@@ -1,5 +1,3 @@
-import { Timestamp } from 'firebase/firestore';
-
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'dispatched' | 'delivered' | 'billing_requested' | 'closed' | 'cancelled';
 
 export interface Customer {
@@ -7,12 +5,14 @@ export interface Customer {
   cpf: string;
   phone?: string;
   table?: string;
+  // Adicionado para suportar Logística e DriverApp
   address?: {
     street?: string;
     number?: string;
     neighborhood?: string;
     city?: string;
     complement?: string;
+    reference?: string; // Para pontos de referência na entrega
   };
 }
 
@@ -24,12 +24,11 @@ export interface OrderItem {
   price: number;
   notes?: string;
   image?: string;
-  imageUrl?: string; // Adicionado para compatibilidade com Analytics
+  imageUrl?: string;
   category?: string;
   status?: 'pending' | 'done';
 }
 
-// Interface usada no Frontend (Carrinho)
 export interface CartItem extends OrderItem {
   cartId: string;
 }
@@ -37,12 +36,13 @@ export interface CartItem extends OrderItem {
 export interface Order {
   id: string;
   restaurantId: string;
+  ownerId?: string;
   customer: Customer;
   items: OrderItem[];
   subtotal: number;
   total: number;
   status: OrderStatus;
-  createdAt: any; // Pode ser Date ou Timestamp dependendo do contexto
+  createdAt: any;
   updatedAt?: any;
   completedAt?: any;
   paymentMethod: 'pix' | 'credit' | 'debit' | 'cash';
@@ -71,7 +71,7 @@ export interface Order {
   };
 }
 
-// Tipos para Analytics e Dashboard
+// Tipos para Dashboard e Analytics
 export interface DashboardMetrics {
   totalRevenue: number;
   todayRevenue: number;
@@ -95,10 +95,13 @@ export interface AISmartOrganizeResponse {
   categories: {
     title: string;
     description: string;
-    items: string[]; // IDs dos itens
+    items: string[];
   }[];
   orderBumps: {
     itemId: string;
     reason: string;
   }[];
+  // Campos adicionais para menuAi.ts
+  suggestedHighlights?: string[];
+  improvedDescriptions?: Record<string, string>;
 }

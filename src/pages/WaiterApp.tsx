@@ -204,14 +204,23 @@ export default function WaiterApp() {
             : i
         );
       }
-      return [...prev, {
-        menuItemId: item.id,
-        name: item.title,
-        price: item.price,
-        quantity: 1,
-        imageUrl: item.imageUrl || undefined
-      }];
+      
+      // Cria novo item respeitando a interface CartItem completa
+      const newItem: CartItem = {
+        id: item.id,                    // Obrigatório (Herdado de OrderItem)
+        menuItemId: item.id,            // Obrigatório
+        name: item.title,               // Obrigatório
+        price: Number(item.price),      // Obrigatório
+        quantity: 1,                    // Obrigatório
+        cartId: crypto.randomUUID(),    // Obrigatório (Exclusivo de CartItem)
+        notes: '',
+        imageUrl: item.imageUrl || ''   // String garantida
+      };
+      
+      return [...prev, newItem];
     });
+    
+    toast.success(`${item.title} adicionado!`);
   };
 
   const removeFromCart = (menuItemId: string) => {
