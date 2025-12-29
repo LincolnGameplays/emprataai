@@ -47,7 +47,7 @@ const TOUR_STEPS: DriveStep[] = [
     popover: {
       title: '🚀 Bem-vindo ao Emprata!',
       description: 'Vamos configurar sua <strong>máquina de vendas</strong> em 30 segundos. Clique em "Próximo" para começar!',
-      side: 'center',
+      side: 'bottom',
       align: 'center',
     }
   },
@@ -82,7 +82,7 @@ const TOUR_STEPS: DriveStep[] = [
     popover: {
       title: '✅ Você está pronto!',
       description: 'Agora é só começar a criar. Se precisar de ajuda, clique no <strong>botão (?) no canto inferior direito</strong>. Boas vendas! 🎉',
-      side: 'center',
+      side: 'bottom',
       align: 'center',
     }
   }

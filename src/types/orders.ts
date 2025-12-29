@@ -1,58 +1,104 @@
+import { Timestamp } from 'firebase/firestore';
+
 export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'dispatched' | 'delivered' | 'billing_requested' | 'closed' | 'cancelled';
 
 export interface Customer {
   name: string;
-  cpf: string; // Formato 000.000.000-00
+  cpf: string;
   phone?: string;
   table?: string;
-  // Delivery address (optional for dine-in)
   address?: {
-    street: string;
-    number: string;
+    street?: string;
+    number?: string;
+    neighborhood?: string;
+    city?: string;
     complement?: string;
-    neighborhood: string;
-    city: string;
-    zipCode?: string;
-    reference?: string;
   };
 }
 
 export interface OrderItem {
-  id: string; // ID único do item no pedido (uuid)
+  id: string;
   menuItemId: string;
   name: string;
   quantity: number;
   price: number;
   notes?: string;
   image?: string;
+  imageUrl?: string; // Adicionado para compatibilidade com Analytics
+  category?: string;
+  status?: 'pending' | 'done';
+}
+
+// Interface usada no Frontend (Carrinho)
+export interface CartItem extends OrderItem {
+  cartId: string;
 }
 
 export interface Order {
   id: string;
-  restaurantId: string; // Owner ID
+  restaurantId: string;
   customer: Customer;
   items: OrderItem[];
   subtotal: number;
   total: number;
   status: OrderStatus;
-  createdAt: any; // Firestore Timestamp
+  createdAt: any; // Pode ser Date ou Timestamp dependendo do contexto
+  updatedAt?: any;
+  completedAt?: any;
   paymentMethod: 'pix' | 'credit' | 'debit' | 'cash';
-  isOrderBumpAccepted: boolean; // Se aceitou a sugestão da IA
+  isOrderBumpAccepted?: boolean;
   
-  // ══════════════════════════════════════════════════════════════════
-  // LOGISTICS FIELDS
-  // ══════════════════════════════════════════════════════════════════
-  driverId?: string; // Assigned driver
-  driverName?: string; // Denormalized for display
-  deliveryFee?: number; // Fee paid to driver
-  dispatchedAt?: any; // When driver left with order
-  deliveredAt?: any; // When delivery confirmed
+  // Campos de Logística
+  driverId?: string;
+  driverName?: string;
+  waiterId?: string;
+  deliveryFee?: number;
+  deliveryPin?: string;
+  deliveryProofUrl?: string;
+  deliveryAttemptCoords?: { lat: number; lng: number };
+  dispatchedAt?: any;
+  deliveredAt?: any;
   
-  // ══════════════════════════════════════════════════════════════════
-  // SECURITY PIN PROTOCOL
-  // ══════════════════════════════════════════════════════════════════
-  deliveryPin?: string; // 4-digit code for customer verification
-  deliveryProofUrl?: string; // Photo proof if left at doorstep/portaria
-  deliveryAttemptCoords?: { lat: number; lng: number }; // GPS at delivery
+  // Campos de Analytics
+  isPaid?: boolean;
+  discountPercent?: number;
+  discountAmount?: number;
+  
+  // Campos de Restaurante
+  restaurant?: {
+    name?: string;
+    phone?: string;
+  };
 }
 
+// Tipos para Analytics e Dashboard
+export interface DashboardMetrics {
+  totalRevenue: number;
+  todayRevenue: number;
+  activeOrders: number;
+  totalOrders: number;
+  averageTicket: number;
+  conversionRate: number;
+  dailySales: { date: string; value: number }[];
+  topItems: { name: string; quantity: number; image: string }[];
+  recentOrders: Order[];
+  revenueChange: number;
+  ordersChange: number;
+  ticketChange: number;
+  // Legacy compatibility
+  topSellingItems?: { name: string; quantity: number; revenue: number }[];
+  ordersByHour?: { hour: number; count: number }[];
+}
+
+// Tipos para IA
+export interface AISmartOrganizeResponse {
+  categories: {
+    title: string;
+    description: string;
+    items: string[]; // IDs dos itens
+  }[];
+  orderBumps: {
+    itemId: string;
+    reason: string;
+  }[];
+}

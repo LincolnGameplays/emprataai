@@ -39,7 +39,7 @@ export function subscribeToOrders(
         id: doc.id,
         createdAt: (data.createdAt as Timestamp)?.toDate() || new Date(),
         updatedAt: (data.updatedAt as Timestamp)?.toDate() || new Date(),
-      } as Order;
+      } as unknown as Order;
     });
 
     callback(orders);
