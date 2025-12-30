@@ -30,7 +30,7 @@ import WhatsappTool from './pages/WhatsappTool';
 import DispatchConsole from './pages/DispatchConsole';
 import DriverApp from './pages/DriverApp';
 import DeliveryTracking from './pages/DeliveryTracking';
-import FinanceSettings from './pages/admin/FinanceSettings';
+import FinanceDashboard from './pages/admin/FinanceDashboard';
 
 // Marketplace (Consumer)
 import MarketplaceHome from './pages/marketplace/Home';
@@ -139,7 +139,7 @@ export default function App() {
           <Route path="/admin/profile" element={<UserProfile />} />
           
           {/* Gestão Financeira */}
-          <Route path="/finance" element={<FinanceSettings />} />
+          <Route path="/finance" element={<FinanceDashboard />} />
           
           {/* Sucesso Pagamento */}
           <Route path="/success" element={<SuccessPage />} />

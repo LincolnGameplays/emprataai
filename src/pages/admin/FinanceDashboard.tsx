@@ -78,9 +78,9 @@ export default function FinanceDashboard() {
         {/* HEADER GERAL */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-black italic tracking-tighter">
-              Financeiro <span className="text-primary">Emprata</span>
-            </h1>
+<h1 className="text-3xl font-black italic tracking-tighter text-red-500">
+  TESTE DE DEPLOY <span className="text-primary">V2</span>
+</h1>
             <p className="text-white/40 text-sm">Gestão completa da sua conta digital.</p>
           </div>
 
@@ -168,22 +168,53 @@ function TabButton({ active, onClick, icon: Icon, label }: any) {
   );
 }
 
-// --- ABA 1: CARTEIRA (Saldo + Saque) ---
+// --- ABA 1: CARTEIRA (Saldo + Saque White Label) ---
 function WalletTab() {
-  const [balance, setBalance] = useState({ available: 0, pending: 0 });
+  const [balance, setBalance] = useState({ 
+    available: 0, 
+    toReceive: 0, 
+    pending: 0, 
+    withdrawFee: 5, 
+    hasWithdrawAccount: false,
+    isLocked: false,
+    hoursUntilUnlock: 0
+  });
   const [loading, setLoading] = useState(true);
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [hide, setHide] = useState(false);
   
   // States do Saque
   const [withdrawLoading, setWithdrawLoading] = useState(false);
-  const [withdrawForm, setWithdrawForm] = useState({ amount: '', pixKey: '', keyType: 'CPF' });
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+
+  // States de Configuração Pix
+  const [configLoading, setConfigLoading] = useState(false);
+  const [pixKey, setPixKey] = useState('');
+  const [pixKeyType, setPixKeyType] = useState<'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP'>('CPF');
+  const [savedPixKey, setSavedPixKey] = useState<string | null>(null);
 
   const fetchBalance = async () => {
      try {
        const fn = httpsCallable(functions, 'financeGetBalance');
        const res: any = await fn();
-       setBalance({ available: res.data.balance, pending: res.data.pending });
+       setBalance({ 
+          available: res.data.available || res.data.balance || 0, 
+          toReceive: res.data.toReceive || 0,
+          pending: res.data.pending || 0,
+          withdrawFee: res.data.withdrawFee || 5,
+          hasWithdrawAccount: res.data.hasWithdrawAccount || false,
+          isLocked: res.data.isLocked || false,
+          hoursUntilUnlock: res.data.hoursUntilUnlock || 0
+        });
+       
+       // Buscar dados da conta de saque
+       const accountFn = httpsCallable(functions, 'getWithdrawAccount');
+       const accRes: any = await accountFn();
+       if (accRes.data.exists) {
+         setSavedPixKey(accRes.data.data.pixKey);
+         setPixKeyType(accRes.data.data.pixKeyType);
+       }
      } catch(e) { console.error(e) } finally { setLoading(false) }
   };
 
@@ -191,30 +222,45 @@ function WalletTab() {
     fetchBalance();
   }, []);
 
+  const handleSavePixConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConfigLoading(true);
+
+    try {
+      const saveFn = httpsCallable(functions, 'saveWithdrawAccount');
+      await saveFn({ pixKey, pixKeyType });
+      
+      toast.success('✅ Conta de recebimento configurada!');
+      setSavedPixKey(pixKey);
+      setIsConfigModalOpen(false);
+      fetchBalance();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao salvar');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
     setWithdrawLoading(true);
 
-    const amountNumber = parseFloat(withdrawForm.amount.replace(/[^0-9,]/g, '').replace(',', '.'));
+    const amountNumber = parseFloat(withdrawAmount.replace(/[^0-9,]/g, '').replace(',', '.'));
 
-    if (amountNumber > balance.available) {
-      toast.error('Saldo insuficiente');
+    if (amountNumber > (balance.available - balance.withdrawFee)) {
+      toast.error(`Saldo insuficiente. Taxa de saque: R$ ${balance.withdrawFee.toFixed(2)}`);
       setWithdrawLoading(false);
       return;
     }
 
     try {
       const withdrawFn = httpsCallable(functions, 'financeWithdraw');
-      await withdrawFn({
-        amount: amountNumber,
-        pixKey: withdrawForm.pixKey,
-        pixKeyType: withdrawForm.keyType
-      });
+      const res: any = await withdrawFn({ amount: amountNumber });
       
-      toast.success('💸 Saque realizado com sucesso!');
+      toast.success(`💸 ${res.data.message}`);
       setIsWithdrawModalOpen(false);
-      setWithdrawForm({ amount: '', pixKey: '', keyType: 'CPF' });
-      fetchBalance(); // Atualiza saldo
+      setWithdrawAmount('');
+      fetchBalance();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao realizar saque');
     } finally {
@@ -226,33 +272,161 @@ function WalletTab() {
 
   return (
     <>
-      <div className="grid md:grid-cols-2 gap-6">
-         {/* Card Principal */}
+      {/* AVISO DE TRAVA DE SEGURANÇA */}
+      {balance.isLocked && (
+        <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center gap-4">
+          <div className="p-3 bg-red-500/20 rounded-xl">
+            <AlertTriangle className="w-6 h-6 text-red-500" />
+          </div>
+          <div>
+            <p className="font-bold text-red-400">Saques Bloqueados Temporariamente</p>
+            <p className="text-sm text-white/60">
+              Por segurança, após alterar a chave Pix os saques ficam bloqueados por 24h.
+              Restam <strong className="text-white">{balance.hoursUntilUnlock} horas</strong>.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid md:grid-cols-3 gap-6">
+         {/* Card Saldo Disponível */}
          <div className="bg-gradient-to-br from-[#1a1a1a] to-black border border-white/10 rounded-3xl p-8 relative overflow-hidden group">
             <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-primary/10 transition-colors" />
             <div className="relative z-10">
               <p className="text-sm font-bold text-white/40 uppercase tracking-widest mb-1">Saldo Disponível</p>
-              <h2 className="text-5xl font-black text-white mb-6 cursor-pointer" onClick={() => setHide(!hide)}>
+              <h2 className="text-4xl font-black text-white mb-6 cursor-pointer" onClick={() => setHide(!hide)}>
                  {hide ? '••••••' : formatCurrency(balance.available)}
               </h2>
-              <div className="flex gap-3">
-                 <button onClick={() => setIsWithdrawModalOpen(true)} className="flex-1 py-3 bg-primary hover:bg-orange-600 rounded-xl font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors">
-                    <ArrowUpRight className="w-4 h-4"/> Sacar Pix
-                 </button>
-              </div>
+              <button 
+                onClick={() => balance.isLocked ? toast.error(`Bloqueado por ${balance.hoursUntilUnlock}h`) : (savedPixKey ? setIsWithdrawModalOpen(true) : setIsConfigModalOpen(true))} 
+                disabled={balance.isLocked}
+                className={`w-full py-3 rounded-xl font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors ${
+                  balance.isLocked 
+                    ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                    : 'bg-primary hover:bg-orange-600'
+                }`}
+              >
+                 <ArrowUpRight className="w-4 h-4"/> {balance.isLocked ? 'Bloqueado' : 'Sacar Pix'}
+              </button>
             </div>
          </div>
 
-         {/* Card Pendente */}
-         <div className="bg-[#121212] border border-white/10 rounded-3xl p-8 flex flex-col justify-center">
+         {/* Card A Receber */}
+         <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
             <div className="flex items-center gap-2 mb-2">
-               <div className="p-2 bg-yellow-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-yellow-500"/></div>
+               <div className="p-2 bg-blue-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-blue-500"/></div>
                <p className="text-sm font-bold text-white/40 uppercase">A Receber</p>
             </div>
-            <p className="text-3xl font-bold text-white/80">{hide ? '••••••' : formatCurrency(balance.pending)}</p>
-            <p className="text-xs text-white/30 mt-2">Vendas no crédito aguardando liquidação.</p>
+            <p className="text-3xl font-bold text-blue-400">{hide ? '••••••' : formatCurrency(balance.toReceive)}</p>
+            <p className="text-xs text-white/30 mt-2">Vendas no cartão de crédito aguardando liquidação (D+30).</p>
+         </div>
+
+         {/* Card Conta de Recebimento */}
+         <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
+            <div className="flex items-center justify-between mb-4">
+               <div className="flex items-center gap-2">
+                  <div className={`p-2 rounded-lg ${savedPixKey ? 'bg-green-500/10' : 'bg-yellow-500/10'}`}>
+                    {savedPixKey ? <CheckCircle2 className="w-4 h-4 text-green-500"/> : <AlertTriangle className="w-4 h-4 text-yellow-500"/>}
+                  </div>
+                  <p className="text-sm font-bold text-white/80">Conta de Saque</p>
+               </div>
+               <button 
+                 onClick={() => setIsConfigModalOpen(true)}
+                 className="text-xs font-bold text-primary hover:underline"
+               >
+                 {savedPixKey ? 'Alterar' : 'Configurar'}
+               </button>
+            </div>
+            
+            {savedPixKey ? (
+              <div className="bg-black/50 rounded-xl p-3">
+                <p className="text-xs text-white/40 mb-1">Chave Pix ({pixKeyType})</p>
+                <p className="font-mono text-white text-sm font-bold truncate">{savedPixKey}</p>
+              </div>
+            ) : (
+              <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-3">
+                <p className="text-xs text-yellow-200/80">
+                  Configure sua chave Pix para poder sacar.
+                </p>
+              </div>
+            )}
+
+            <div className="mt-3 pt-3 border-t border-white/5">
+              <div className="flex justify-between text-xs">
+                <span className="text-white/40">Taxa de saque:</span>
+                <span className="text-white font-bold">R$ {balance.withdrawFee.toFixed(2)}</span>
+              </div>
+            </div>
          </div>
       </div>
+
+
+      {/* MODAL DE CONFIGURAÇÃO PIX */}
+      <AnimatePresence>
+          {isConfigModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setIsConfigModalOpen(false)}
+                className="absolute inset-0 bg-black/90 backdrop-blur-sm"
+              />
+              <motion.div 
+                initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
+                className="relative bg-[#121212] border border-white/10 w-full max-w-md rounded-3xl p-6 md:p-8 shadow-2xl"
+              >
+                <div className="flex justify-between items-start mb-6">
+                   <div>
+                      <h3 className="text-2xl font-black italic uppercase mb-1">Conta de Recebimento</h3>
+                      <p className="text-white/40 text-sm">Configure para onde enviar seus saques.</p>
+                   </div>
+                   <button onClick={() => setIsConfigModalOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10">
+                     <ArrowDownLeft className="w-4 h-4 rotate-45" />
+                   </button>
+                </div>
+
+                <form onSubmit={handleSavePixConfig} className="space-y-4">
+                  <div className="grid grid-cols-5 gap-2">
+                     {(['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'] as const).map(type => (
+                       <button
+                         key={type} type="button"
+                         onClick={() => setPixKeyType(type)}
+                         className={`py-2 rounded-lg text-xs font-bold border transition-colors ${pixKeyType === type ? 'bg-primary text-white border-primary' : 'bg-transparent text-white/40 border-white/10 hover:bg-white/5'}`}
+                       >
+                         {type === 'EVP' ? 'Aleatória' : type}
+                       </button>
+                     ))}
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-white/50 uppercase">Chave Pix</label>
+                    <input 
+                      value={pixKey}
+                      onChange={(e) => setPixKey(e.target.value)}
+                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
+                      placeholder={`Digite seu ${pixKeyType === 'EVP' ? 'código aleatório' : pixKeyType}`}
+                      required
+                    />
+                  </div>
+
+                  <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex gap-3 items-start">
+                    <Info className="w-5 h-5 text-blue-500 shrink-0" />
+                    <p className="text-xs text-blue-200/70">
+                      Esta é a conta para onde seu dinheiro será enviado. Certifique-se de que está correta.
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={configLoading || !pixKey}
+                    className="w-full py-4 bg-primary hover:bg-orange-600 rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {configLoading ? <Loader2 className="animate-spin" /> : 'Salvar Conta'}
+                  </button>
+                </form>
+              </motion.div>
+            </div>
+      )}
+      </AnimatePresence>
 
       {/* MODAL DE SAQUE */}
       <AnimatePresence>
@@ -269,10 +443,18 @@ function WalletTab() {
               >
                 <div className="flex justify-between items-start mb-6">
                    <div>
-                      <h3 className="text-2xl font-black italic uppercase mb-1">Realizar Saque</h3>
+                      <h3 className="text-2xl font-black italic uppercase mb-1">Sacar Dinheiro</h3>
                       <p className="text-white/40 text-sm">Transferência Pix instantânea.</p>
                    </div>
-                   <button onClick={() => setIsWithdrawModalOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10"><ArrowDownLeft className="w-4 h-4 rotate-45" /></button>
+                   <button onClick={() => setIsWithdrawModalOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10">
+                     <ArrowDownLeft className="w-4 h-4 rotate-45" />
+                   </button>
+                </div>
+
+                {/* Destino do Saque */}
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 mb-6">
+                  <p className="text-xs text-white/50 mb-1">Enviar para:</p>
+                  <p className="font-mono text-green-400 font-bold">{savedPixKey}</p>
                 </div>
 
                 <form onSubmit={handleWithdraw} className="space-y-4">
@@ -283,51 +465,33 @@ function WalletTab() {
                       blocks={{
                         num: { mask: Number, thousandsSeparator: '.', padFractionalZeros: true, radix: ',', scale: 2 }
                       } as any}
-                      value={withdrawForm.amount}
-                      onAccept={(val: any) => setWithdrawForm({ ...withdrawForm, amount: val })}
+                      value={withdrawAmount}
+                      onAccept={(val: any) => setWithdrawAmount(val)}
                       className="w-full bg-black border border-white/10 rounded-xl px-4 py-4 text-2xl font-bold text-white focus:border-primary outline-none"
                       placeholder="R$ 0,00"
                     />
                     <div className="flex justify-between mt-1 text-xs">
-                       <span className="text-white/30">Disponível: {formatCurrency(balance.available)}</span>
-                       <button type="button" onClick={() => setWithdrawForm({...withdrawForm, amount: balance.available.toFixed(2).replace('.',',')})} className="text-primary font-bold hover:underline">
+                       <span className="text-white/30">Disponível: {formatCurrency(balance.available - balance.withdrawFee)}</span>
+                       <button 
+                         type="button" 
+                         onClick={() => setWithdrawAmount(Math.max(0, balance.available - balance.withdrawFee).toFixed(2).replace('.',','))} 
+                         className="text-primary font-bold hover:underline"
+                       >
                          Sacar Tudo
                        </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2">
-                     {['CPF', 'CNPJ', 'EMAIL'].map(type => (
-                       <button
-                         key={type} type="button"
-                         onClick={() => setWithdrawForm({ ...withdrawForm, keyType: type })}
-                         className={`py-2 rounded-lg text-xs font-bold border transition-colors ${withdrawForm.keyType === type ? 'bg-white text-black border-white' : 'bg-transparent text-white/40 border-white/10 hover:bg-white/5'}`}
-                       >
-                         {type}
-                       </button>
-                     ))}
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-white/50 uppercase">Chave Pix</label>
-                    <input 
-                      value={withdrawForm.pixKey}
-                      onChange={(e) => setWithdrawForm({ ...withdrawForm, pixKey: e.target.value })}
-                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
-                      placeholder={`Digite seu ${withdrawForm.keyType}`}
-                    />
-                  </div>
-
                   <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl flex gap-3 items-start">
                     <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0" />
                     <p className="text-xs text-yellow-200/70">
-                      Taxa de saque: <strong>R$ 3,50</strong> (cobrada pelo Asaas).
+                      Taxa de saque: <strong>R$ {balance.withdrawFee.toFixed(2)}</strong>
                     </p>
                   </div>
 
                   <button
                     type="submit"
-                    disabled={withdrawLoading || !withdrawForm.amount}
+                    disabled={withdrawLoading || !withdrawAmount}
                     className="w-full py-4 bg-primary hover:bg-orange-600 rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {withdrawLoading ? <Loader2 className="animate-spin" /> : 'Confirmar Saque'}
@@ -341,51 +505,127 @@ function WalletTab() {
   );
 }
 
-// --- ABA 2: EXTRATO ---
+
+// --- ABA 2: EXTRATO (Com dados do Asaas em tempo real) ---
 function ExtractTab() {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState<'asaas' | 'local'>('asaas');
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const fetchAsaasStatement = async (offset = 0) => {
+    try {
+      const fn = httpsCallable(functions, 'financeGetStatement');
+      const res: any = await fn({ limit: 20, offset });
+      
+      if (offset === 0) {
+        setTransactions(res.data.data);
+      } else {
+        setTransactions(prev => [...prev, ...res.data.data]);
+      }
+      setHasMore(res.data.hasMore);
+      setSource('asaas');
+    } catch (e) {
+      console.log('[EXTRATO] Fallback para Firestore local');
+      // Fallback: Dados locais do Firestore
+      await fetchLocalTransactions();
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const fetchLocalTransactions = async () => {
+    if (!user) return;
+    const q = query(collection(db, 'users', user.uid, 'transactions'), orderBy('date', 'desc'), limit(20));
+    const snap = await getDocs(q);
+    setTransactions(snap.docs.map(d => ({
+      ...d.data(),
+      id: d.id,
+      value: d.data().amount,
+      type: d.data().type === 'withdraw' ? 'DEBIT' : 'CREDIT',
+      date: d.data().date?.toDate ? new Date(d.data().date.toDate()).toISOString().split('T')[0] : 'Hoje',
+      description: d.data().type === 'withdraw' ? 'Saque Pix' : 'Venda Recebida'
+    })));
+    setSource('local');
+  };
 
   useEffect(() => {
-    if(!user) return;
-    const q = query(collection(db, 'users', user.uid, 'transactions'), orderBy('date', 'desc'), limit(20));
-    getDocs(q).then(snap => {
-       setTransactions(snap.docs.map(d => d.data()));
-       setLoading(false);
-    });
+    fetchAsaasStatement();
   }, [user]);
 
-  if(loading) return <Loader2 className="animate-spin mx-auto"/>;
+  const loadMore = () => {
+    setLoadingMore(true);
+    fetchAsaasStatement(transactions.length);
+  };
+
+  if (loading) return <div className="p-10 text-center"><Loader2 className="animate-spin mx-auto text-primary"/></div>;
 
   return (
     <div className="bg-[#121212] border border-white/10 rounded-3xl overflow-hidden">
-       <div className="p-6 border-b border-white/10">
-          <h3 className="font-bold text-lg">Últimas Movimentações</h3>
+       <div className="p-6 border-b border-white/10 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-lg">Extrato Financeiro</h3>
+            <p className="text-xs text-white/40">
+              {source === 'asaas' ? '✓ Dados em tempo real do Asaas' : '⚠ Dados locais (cache)'}
+            </p>
+          </div>
+          <button 
+            onClick={() => { setLoading(true); fetchAsaasStatement(); }}
+            className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
+          >
+            <History className="w-4 h-4 text-white/60" />
+          </button>
        </div>
+       
        <div className="divide-y divide-white/10">
           {transactions.length === 0 ? (
-             <div className="p-10 text-center text-white/30">Nenhuma transação encontrada.</div>
+             <div className="p-10 text-center text-white/30">
+               <DollarSign className="w-12 h-12 mx-auto mb-4 opacity-20"/>
+               <p>Nenhuma transação encontrada.</p>
+               <p className="text-xs mt-2">Suas movimentações aparecerão aqui.</p>
+             </div>
           ) : transactions.map((tx, i) => (
-             <div key={i} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
+             <div key={tx.id || i} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
                 <div className="flex items-center gap-4">
-                   <div className={`p-3 rounded-full ${tx.type === 'withdraw' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
-                      {tx.type === 'withdraw' ? <ArrowUpRight className="w-4 h-4"/> : <ArrowDownLeft className="w-4 h-4"/>}
+                   <div className={`p-3 rounded-full ${tx.type === 'DEBIT' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
+                      {tx.type === 'DEBIT' ? <ArrowUpRight className="w-4 h-4"/> : <ArrowDownLeft className="w-4 h-4"/>}
                    </div>
                    <div>
-                      <p className="font-bold text-sm">{tx.type === 'withdraw' ? 'Saque Pix' : 'Venda Recebida'}</p>
-                      <p className="text-xs text-white/40">{tx.date?.toDate ? new Date(tx.date.toDate()).toLocaleDateString() : 'Hoje'}</p>
+                      <p className="font-bold text-sm">{tx.description || (tx.type === 'DEBIT' ? 'Saque/Transferência' : 'Recebimento')}</p>
+                      <p className="text-xs text-white/40">{tx.date}</p>
                    </div>
                 </div>
-                <span className={`font-mono font-bold ${tx.type === 'withdraw' ? 'text-white' : 'text-green-400'}`}>
-                   {tx.type === 'withdraw' ? '-' : '+'}{formatCurrency(tx.amount)}
-                </span>
+                <div className="text-right">
+                  <span className={`font-mono font-bold ${tx.type === 'DEBIT' ? 'text-white' : 'text-green-400'}`}>
+                     {tx.type === 'DEBIT' ? '-' : '+'}{formatCurrency(Math.abs(tx.value))}
+                  </span>
+                  {tx.balance !== undefined && (
+                    <p className="text-xs text-white/30 mt-1">Saldo: {formatCurrency(tx.balance)}</p>
+                  )}
+                </div>
              </div>
           ))}
        </div>
+
+       {/* Botão Carregar Mais */}
+       {hasMore && (
+         <div className="p-4 border-t border-white/10">
+           <button 
+             onClick={loadMore}
+             disabled={loadingMore}
+             className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2"
+           >
+             {loadingMore ? <Loader2 className="animate-spin w-4 h-4"/> : 'Carregar Mais'}
+           </button>
+         </div>
+       )}
     </div>
   );
 }
+
 
 // --- ABA 3: CONFIGURAÇÕES E DESVINCULAR ---
 function SettingsTab({ financeData }: any) {

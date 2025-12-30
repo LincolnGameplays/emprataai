@@ -1,4 +1,5 @@
-import * as functions from 'firebase-functions';
+// ✅ IMPORTAÇÃO V2 CORRETA
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
 import axios from 'axios';
 import { ASAAS_CONFIG } from './constants';
@@ -11,41 +12,40 @@ interface OnboardRequest {
   email: string;
   cpfCnpj: string;
   birthDate?: string;
-  companyType: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION' | 'UNKNOWN';
+  companyType: string;
   incomeValue: number;
   phone: string;
   postalCode: string;
   address: string;
   addressNumber: string;
   province: string;
-  city: string; // Recebemos do front, mas não mandamos para o Asaas (usamos CEP)
+  city: string;
   state: string;
 }
 
-export const financeOnboard = functions.https.onCall(async (request) => {
+interface LinkAccountRequest {
+  apiKey: string;
+}
+
+// ✅ Usamos 'onCall' direto (V2)
+export const financeOnboard = onCall(async (request) => {
   const data = request.data as OnboardRequest;
   const auth = request.auth;
 
-  if (!auth) throw new functions.https.HttpsError('unauthenticated', 'User must be logged in');
+  if (!auth) throw new HttpsError('unauthenticated', 'User must be logged in');
 
-  const required = ['name', 'email', 'cpfCnpj', 'phone', 'postalCode', 'address', 'addressNumber', 'incomeValue'];
+  const required = [
+    'name', 'email', 'cpfCnpj', 'phone', 'postalCode', 
+    'address', 'addressNumber', 'incomeValue'
+  ];
   
   for (const field of required) {
     if (!data[field as keyof OnboardRequest]) {
-      throw new functions.https.HttpsError('invalid-argument', `Campo obrigatório faltando: ${field}`);
+      throw new HttpsError('invalid-argument', `Campo obrigatório faltando: ${field}`);
     }
   }
 
-  const isPerson = data.cpfCnpj.replace(/\D/g, '').length === 11;
-  if ((isPerson || data.companyType === 'MEI') && !data.birthDate) {
-     throw new functions.https.HttpsError('invalid-argument', 'Data de nascimento é obrigatória para CPF ou MEI.');
-  }
-
   try {
-    // PREPARAÇÃO DO PAYLOAD
-    // IMPORTANTE: Não enviamos o campo 'city'. O Asaas deduz pelo 'postalCode'.
-    // Enviar city: 0 causa erro de validação.
-    
     const payload = {
       name: data.name,
       email: data.email,
@@ -86,79 +86,63 @@ export const financeOnboard = functions.https.onCall(async (request) => {
 
     return { success: true, accountId: asaasAccount.id };
 
-  } catch (error: any) {
-    console.error('[ONBOARD ERROR]', error.response?.data || error.message);
-    
-    // Melhora a mensagem de erro para o frontend
-    const apiError = error.response?.data?.errors?.[0]?.description;
-    
-    if (apiError === 'É necessário informar a cidade.') {
-       throw new functions.https.HttpsError('invalid-argument', 'CEP inválido ou não encontrado na base do Asaas. Verifique o CEP.');
-    }
-
-    const errorMessage = apiError || error.message || 'Erro ao criar conta financeira';
-    throw new functions.https.HttpsError('internal', errorMessage);
+  } catch (error: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = error as any;
+    console.error('[ONBOARD ERROR]', err.response?.data || err.message);
+    const apiError = err.response?.data?.errors?.[0]?.description;
+    const errorMessage = apiError || err.message || 'Erro ao criar conta financeira';
+    throw new HttpsError('internal', errorMessage);
   }
 });
 
-// ADICIONE ISTO NO FINAL DO ARQUIVO:
-
-export const financeUnlinkAccount = functions.https.onCall(async (request) => {
-  const auth = request.auth;
-  if (!auth) throw new functions.https.HttpsError('unauthenticated', 'Login necessário');
+export const financeUnlinkAccount = onCall(async (request) => {
+  const auth = request.auth; 
+  if (!auth) throw new HttpsError('unauthenticated', 'Login necessário');
 
   try {
-    // Remove o objeto 'finance' do usuário.
-    // Isso NÃO apaga a conta no Asaas (para manter histórico fiscal), 
-    // mas desvincula do painel para permitir criar outra.
     await db.collection('users').doc(auth.uid).update({
       finance: admin.firestore.FieldValue.delete()
     });
-
     return { success: true, message: 'Conta desvinculada com sucesso.' };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[UNLINK ERROR]', error);
-    throw new functions.https.HttpsError('internal', 'Erro ao desvincular conta.');
+    throw new HttpsError('internal', 'Erro ao desvincular conta.');
   }
 });
 
-// LINK EXISTING ACCOUNT
-interface LinkAccountRequest {
-  apiKey: string;
-}
-
-export const financeLinkExistingAccount = functions.https.onCall(async (request) => {
+export const financeLinkExistingAccount = onCall(async (request) => {
   const data = request.data as LinkAccountRequest;
   const auth = request.auth;
 
-  if (!auth) throw new functions.https.HttpsError('unauthenticated', 'Login necessário');
-  if (!data.apiKey || !data.apiKey.startsWith('$')) {
-    throw new functions.https.HttpsError('invalid-argument', 'Chave de API inválida (deve começar com $).');
+  if (!auth) throw new HttpsError('unauthenticated', 'Login necessário');
+  
+  if (!data.apiKey || !data.apiKey.trim().startsWith('$')) {
+    throw new HttpsError(
+      'invalid-argument', 
+      'Chave de API inválida (deve começar com $).'
+    );
   }
 
   try {
     console.log(`[LINK] Tentando vincular conta para usuário ${auth.uid}...`);
 
-    // 1. Testa a chave consultando os dados da conta comercial
-    // GET /api/v3/myAccount
     const response = await axios.get(
       `${ASAAS_CONFIG.baseUrl}/myAccount`,
-      { headers: { 'access_token': data.apiKey } }
+      { headers: { 'access_token': data.apiKey.trim() } }
     );
 
     const accountData = response.data;
-    const walletId = accountData.walletId || accountData.id; // Fallback
+    const walletId = accountData.walletId || accountData.id;
 
-    // 2. Salva no Firestore
-    // Marcamos documentos como 'true' pois se a conta já existe, assumimos que já enviou docs pro Asaas
     await db.collection('users').doc(auth.uid).set({
       finance: {
         asaasAccountId: accountData.id,
         asaasWalletId: walletId,
-        asaasApiKey: data.apiKey,
+        asaasApiKey: data.apiKey.trim(),
         status: 'active',
         onboardedAt: admin.firestore.FieldValue.serverTimestamp(),
-        linkedExisting: true, // Flag para saber que foi vinculada
+        linkedExisting: true,
         documents: {
           docIdSent: true,
           docSelfieSent: true,
@@ -173,13 +157,14 @@ export const financeLinkExistingAccount = functions.https.onCall(async (request)
       tradingName: accountData.tradingName || accountData.companyName
     };
 
-  } catch (error: any) {
-    console.error('[LINK ERROR]', error.response?.data || error.message);
+  } catch (error: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const err = error as any;
+    console.error('[LINK ERROR]', err.response?.data || err.message);
     
-    if (error.response?.status === 401) {
-       throw new functions.https.HttpsError('permission-denied', 'Chave de API incorreta ou revogada.');
+    if (err.response?.status === 401) {
+       throw new HttpsError('permission-denied', 'Chave de API incorreta ou revogada.');
     }
-
-    throw new functions.https.HttpsError('internal', 'Erro ao vincular conta. Verifique a chave.');
+    throw new HttpsError('internal', 'Erro ao vincular conta. Verifique a chave.');
   }
 });

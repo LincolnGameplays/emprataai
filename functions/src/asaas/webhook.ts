@@ -1,277 +1,109 @@
-/**
- * ⚡ ASAAS WEBHOOK - Unified Payment Handler ⚡
- * Handles both:
- * - SaaS Subscriptions (100% to Emprata)
- * - Pizza Sales with Split (commission to Emprata, rest to restaurant)
- */
-
-import * as functions from 'firebase-functions';
+// ✅ IMPORTAÇÃO V2
+import { onRequest } from 'firebase-functions/v2/https';
 import * as admin from 'firebase-admin';
-import { ASAAS_CONFIG, ASAAS_EVENTS } from './constants';
+import { ASAAS_CONFIG } from './constants';
 
-// Initialize if not already
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-// ══════════════════════════════════════════════════════════════════
-// PLAN DETECTION BY VALUE
-// ══════════════════════════════════════════════════════════════════
+export const financeWebhook = onRequest(async (req, res) => {
+  const token = req.headers['asaas-access-token'];
 
-function detectPlanFromValue(value: number): { plan: string; credits: number } {
-  if (value >= 390) return { plan: 'SCALE', credits: 500 };
-  if (value >= 190) return { plan: 'GROWTH', credits: 200 };
-  if (value >= 90) return { plan: 'STARTER', credits: 50 };
-  return { plan: 'FREE', credits: 0 };
-}
-
-// ══════════════════════════════════════════════════════════════════
-// TYPES
-// ══════════════════════════════════════════════════════════════════
-
-interface AsaasWebhookPayload {
-  event: string;
-  payment: {
-    id: string;
-    customer: string;
-    value: number;
-    netValue: number;
-    billingType: string;
-    status: string;
-    dueDate: string;
-    paymentDate?: string;
-    externalReference?: string;
-    description?: string;
-    invoiceUrl?: string;
-    subscription?: string; // Subscription ID if recurring
-  };
-}
-
-// ══════════════════════════════════════════════════════════════════
-// MAIN WEBHOOK HANDLER
-// ══════════════════════════════════════════════════════════════════
-
-export const asaasWebhook = functions.https.onRequest(async (req, res) => {
-  // Only accept POST
-  if (req.method !== 'POST') {
-    res.status(405).send('Method Not Allowed');
-    return;
-  }
-
-  // Security: Verify webhook token (optional but recommended)
-  const accessToken = req.headers['asaas-access-token'] || req.headers['access-token'];
-  
-  if (ASAAS_CONFIG.webhookToken && accessToken !== ASAAS_CONFIG.webhookToken) {
-    console.warn('[WEBHOOK] Invalid token received');
+  if (token !== ASAAS_CONFIG.webhookToken) {
+    console.error('[WEBHOOK] Token inválido:', token);
     res.status(401).send('Unauthorized');
     return;
   }
 
-  const payload: AsaasWebhookPayload = req.body;
-  
-  if (!payload || !payload.event || !payload.payment) {
-    res.status(400).send('Invalid payload');
-    return;
-  }
-
-  const { event, payment } = payload;
-  const externalRef = payment.externalReference;
-  const isSubscription = !!payment.subscription || payment.description?.includes('Assinatura');
-
-  console.log(`[WEBHOOK] Event: ${event}, Payment: ${payment.id}, ` +
-              `Ref: ${externalRef}, IsSubscription: ${isSubscription}`);
+  const event = req.body;
+  console.log('[WEBHOOK] Evento recebido:', event.event, event.payment?.id);
 
   try {
-    // ════════════════════════════════════════════════════════════
-    // PAYMENT CONFIRMED
-    // ════════════════════════════════════════════════════════════
-    if (event === ASAAS_EVENTS.PAYMENT_RECEIVED || event === ASAAS_EVENTS.PAYMENT_CONFIRMED) {
+    switch (event.event) {
+      case 'PAYMENT_RECEIVED':
+      case 'PAYMENT_CONFIRMED':
+        await handlePaymentReceived(event.payment);
+        break;
       
-      // TYPE A: SaaS Subscription Payment
-      if (isSubscription && externalRef) {
-        await handleSubscriptionPayment(externalRef, payment);
-        res.json({ received: true, type: 'subscription' });
-        return;
-      }
+      case 'PAYMENT_REFUNDED':
+        await handlePaymentRefunded(event.payment);
+        break;
+      
+      case 'TRANSFER_RECEIVED':
+        await handleTransferReceived(event.transfer);
+        break;
 
-      // TYPE B: Restaurant Order (Split Payment)
-      if (externalRef && !isSubscription) {
-        await handleOrderPayment(externalRef, payment);
-        res.json({ received: true, type: 'order' });
-        return;
-      }
+      default:
+        console.log('[WEBHOOK] Evento ignorado:', event.event);
     }
 
-    // ════════════════════════════════════════════════════════════
-    // PAYMENT OVERDUE
-    // ════════════════════════════════════════════════════════════
-    if (event === ASAAS_EVENTS.PAYMENT_OVERDUE && externalRef) {
-      if (isSubscription) {
-        await handleSubscriptionOverdue(externalRef);
-      } else {
-        await handleOrderOverdue(externalRef);
-      }
-      res.json({ received: true, type: 'overdue' });
-      return;
-    }
-
-    // ════════════════════════════════════════════════════════════
-    // PAYMENT REFUNDED
-    // ════════════════════════════════════════════════════════════
-    if (event === ASAAS_EVENTS.PAYMENT_REFUNDED && externalRef) {
-      await handleRefund(externalRef, payment, !!isSubscription);
-      res.json({ received: true, type: 'refund' });
-      return;
-    }
-
-    // Unhandled event
-    console.log(`[WEBHOOK] Unhandled event: ${event}`);
-    res.json({ received: true });
-
-  } catch (error: any) {
-    console.error('[WEBHOOK ERROR]', error.message);
-    res.status(500).json({ error: error.message });
+    res.status(200).send({ received: true });
+  } catch (error) {
+    console.error('[WEBHOOK ERROR]', error);
+    res.status(500).send('Internal Error');
   }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// HANDLER: SaaS Subscription Payment
-// ══════════════════════════════════════════════════════════════════
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handlePaymentReceived(payment: any) {
+  const externalRef = payment.externalReference;
+  if (!externalRef) return; 
 
-async function handleSubscriptionPayment(
-  userId: string,
-  payment: AsaasWebhookPayload['payment']
-) {
-  const { plan, credits } = detectPlanFromValue(payment.value);
+  // Se for ORDER (Pedido Marketplace)
+  if (!externalRef.startsWith('SUB_')) {
+    const orderRef = db.collection('orders').doc(externalRef);
+    const orderDoc = await orderRef.get();
 
-  console.log(`[SaaS] User ${userId} paid R$${payment.value} → Plan: ${plan}, Credits: ${credits}`);
+    if (orderDoc.exists) {
+      await orderRef.update({
+        status: 'PAID',
+        paymentStatus: 'APPROVED',
+        paidAt: admin.firestore.FieldValue.serverTimestamp(),
+        paymentId: payment.id
+      });
+      console.log(`[WEBHOOK] Pedido ${externalRef} pago.`);
 
-  // Calculate next renewal (30 days from now)
-  const renewsAt = new Date();
-  renewsAt.setDate(renewsAt.getDate() + 30);
-
-  await db.collection('users').doc(userId).update({
-    plan: plan.toLowerCase(),
-    credits: admin.firestore.FieldValue.increment(credits),
-    'subscription.status': 'active',
-    'subscription.lastPaymentAt': admin.firestore.FieldValue.serverTimestamp(),
-    'subscription.renewsAt': admin.firestore.Timestamp.fromDate(renewsAt),
-    'subscription.lastPaymentValue': payment.value,
-  });
-
-  // Audit log
-  await db.collection('audit_logs').add({
-    action: 'subscription_payment',
-    userId,
-    paymentId: payment.id,
-    value: payment.value,
-    plan,
-    credits,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    severity: 'info',
-  });
-
-  console.log(`[SaaS] User ${userId} upgraded to ${plan} with ${credits} credits`);
-}
-
-// ══════════════════════════════════════════════════════════════════
-// HANDLER: Restaurant Order Payment (Split)
-// ══════════════════════════════════════════════════════════════════
-
-async function handleOrderPayment(
-  orderId: string,
-  payment: AsaasWebhookPayload['payment']
-) {
-  const orderRef = db.collection('orders').doc(orderId);
-  const orderDoc = await orderRef.get();
-
-  if (!orderDoc.exists) {
-    console.warn(`[WEBHOOK] Order not found: ${orderId}`);
-    return;
-  }
-
-  const orderData = orderDoc.data()!;
-
-  await orderRef.update({
-    status: 'preparing',
-    paymentStatus: 'paid',
-    paymentDate: payment.paymentDate || new Date().toISOString(),
-    paymentNetValue: payment.netValue,
-    isPaid: true,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  console.log(`[ORDER] Order ${orderId} marked as PAID and PREPARING`);
-
-  // Audit log
-  await db.collection('audit_logs').add({
-    action: 'order_payment_confirmed',
-    orderId,
-    paymentId: payment.id,
-    value: payment.value,
-    netValue: payment.netValue,
-    restaurantId: orderData.restaurantId,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    severity: 'info',
-  });
-}
-
-// ══════════════════════════════════════════════════════════════════
-// HANDLER: Subscription Overdue
-// ══════════════════════════════════════════════════════════════════
-
-async function handleSubscriptionOverdue(userId: string) {
-  await db.collection('users').doc(userId).update({
-    'subscription.status': 'overdue',
-  });
-
-  console.log(`[SaaS] User ${userId} subscription OVERDUE`);
-}
-
-// ══════════════════════════════════════════════════════════════════
-// HANDLER: Order Overdue
-// ══════════════════════════════════════════════════════════════════
-
-async function handleOrderOverdue(orderId: string) {
-  await db.collection('orders').doc(orderId).update({
-    paymentStatus: 'overdue',
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  console.log(`[ORDER] Order ${orderId} payment OVERDUE`);
-}
-
-// ══════════════════════════════════════════════════════════════════
-// HANDLER: Refund
-// ══════════════════════════════════════════════════════════════════
-
-async function handleRefund(
-  refId: string,
-  payment: AsaasWebhookPayload['payment'],
-  isSubscription: boolean
-) {
-  if (isSubscription) {
-    // Downgrade to free on refund
-    await db.collection('users').doc(refId).update({
-      plan: 'free',
-      'subscription.status': 'refunded',
+      // ✅ NOVO: Notificação em Tempo Real para o Restaurante
+      const restaurantId = orderDoc.data()?.restaurantId;
+      if (restaurantId) {
+        await db.collection('users').doc(restaurantId).collection('notifications').add({
+          type: 'SALE_APPROVED',
+          amount: payment.value,
+          orderId: externalRef,
+          date: admin.firestore.FieldValue.serverTimestamp(),
+          read: false
+        });
+        console.log(`[WEBHOOK] Notificação enviada para restaurante ${restaurantId}`);
+      }
+    }
+  } 
+  // Se for ASSINATURA (SUB_)
+  else {
+    const userId = externalRef.replace('SUB_', '');
+    console.log(`[WEBHOOK] Assinatura do usuário ${userId} paga.`);
+    
+    // Atualiza status da assinatura no Firestore
+    await db.collection('users').doc(userId).update({
+      'subscription.status': 'active',
+      'subscription.lastPayment': admin.firestore.FieldValue.serverTimestamp()
     });
-    console.log(`[SaaS] User ${refId} subscription REFUNDED, downgraded to free`);
-  } else {
-    await db.collection('orders').doc(refId).update({
-      status: 'cancelled',
-      paymentStatus: 'refunded',
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-    console.log(`[ORDER] Order ${refId} REFUNDED and cancelled`);
   }
+}
 
-  // Audit log
-  await db.collection('audit_logs').add({
-    action: isSubscription ? 'subscription_refunded' : 'order_refunded',
-    refId,
-    paymentId: payment.id,
-    value: payment.value,
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-    severity: 'warning',
-  });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handlePaymentRefunded(payment: any) {
+  const externalRef = payment.externalReference;
+  if (externalRef && !externalRef.startsWith('SUB_')) {
+     await db.collection('orders').doc(externalRef).update({
+        status: 'REFUNDED',
+        paymentStatus: 'REFUNDED'
+     });
+  }
+}
+
+// ✅ NOVO: Handler para Transferências Recebidas (Pix direto na conta)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function handleTransferReceived(transfer: any) {
+  console.log('[WEBHOOK] Transferência recebida:', transfer?.id, transfer?.value);
+  // Implementar lógica se necessário para rastrear transferências diretas
 }
