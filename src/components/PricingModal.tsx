@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Zap, CheckCircle2, Star, Sparkles, Crown, Loader2 } from 'lucide-react';
-import { useAppStore } from '../store/useAppStore'; // ou seu hook useAuth
+import { useAppStore } from '../store/useAppStore';
 import { useNavigate, Link } from 'react-router-dom';
-import CheckoutModal from './CheckoutModal'; // ✅ Importamos o modal novo
+import CheckoutModal from './CheckoutModal';
 
 interface PricingModalProps {
   isOpen: boolean;
@@ -11,35 +11,40 @@ interface PricingModalProps {
 }
 
 export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
-  const user = useAppStore((state) => state.userId); // Verifica se tem user logado
+  const user = useAppStore((state) => state.userId);
   const navigate = useNavigate();
   
-  // Estado para controlar qual plano está sendo comprado
-  const [checkoutConfig, setCheckoutConfig] = useState<{
+  // Estado local para abrir o checkout SE O USUÁRIO JÁ ESTIVER LOGADO
+  const [localCheckout, setLocalCheckout] = useState<{
     plan: 'STARTER' | 'GROWTH';
     price: number;
   } | null>(null);
 
   const handleSelectPlan = (plan: 'STARTER' | 'GROWTH') => {
-    // 1. Se não estiver logado, manda pro login
+    // 1. Salva a intenção SEMPRE (para recuperar após login)
+    sessionStorage.setItem('pending_plan', plan);
+
     if (!user) {
-      sessionStorage.setItem('pending_plan', plan); // Salva intenção
+      // 2a. Se NÃO logado: Vai pro login
       navigate('/auth');
       onClose();
-      return;
+    } else {
+      // 2b. Se JÁ logado: Abre o checkout aqui mesmo
+      // NÃO chamamos onClose() para não desmontar o modal pai bruscamente
+      setLocalCheckout({
+        plan,
+        price: plan === 'STARTER' ? 97.00 : 197.00
+      });
+      
+      // Limpa do storage já que vamos usar agora
+      sessionStorage.removeItem('pending_plan');
     }
-
-    // 2. Se estiver logado, ABRE O MODAL DE CHECKOUT (Não redireciona!)
-    setCheckoutConfig({
-      plan,
-      price: plan === 'STARTER' ? 97.00 : 197.00
-    });
   };
   
   return (
     <>
       <AnimatePresence>
-        {isOpen && (
+        {isOpen && !localCheckout && (
           <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 md:p-6">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -54,6 +59,7 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
               className="relative w-full max-w-6xl bg-[#0a0a0a] border border-white/10 rounded-[3rem] overflow-hidden shadow-[0_0_100px_rgba(255,94,0,0.3)] max-h-[90vh] overflow-y-auto"
             >
               <button 
+                type="button"
                 onClick={onClose}
                 className="absolute top-6 right-6 p-3 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors z-10"
               >
@@ -90,7 +96,10 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                       <li className="flex gap-2 items-start"><CheckCircle2 className="w-4 h-4 text-white/20"/> Baixa Resolução</li>
                     </ul>
                     <Link to="/app" onClick={onClose} className="mt-auto">
-                      <button className="w-full py-4 rounded-2xl border-2 border-white/10 font-black hover:bg-white/5 transition-all uppercase tracking-widest text-xs">
+                      <button 
+                        type="button"
+                        className="w-full py-4 rounded-2xl border-2 border-white/10 font-black hover:bg-white/5 transition-all uppercase tracking-widest text-xs"
+                      >
                         Testar Agora
                       </button>
                     </Link>
@@ -114,6 +123,7 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                       <li className="flex gap-2 items-start"><Sparkles className="w-4 h-4 text-blue-400"/> Full HD</li>
                     </ul>
                     <button 
+                      type="button"
                       onClick={() => handleSelectPlan('STARTER')}
                       className="w-full py-5 rounded-2xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto flex items-center justify-center gap-2"
                     >
@@ -140,6 +150,7 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                       <li className="flex gap-2 items-start"><Crown className="w-4 h-4 text-primary"/> Sem Marca d'água</li>
                     </ul>
                     <button 
+                      type="button"
                       onClick={() => handleSelectPlan('GROWTH')}
                       className="w-full py-5 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto relative z-10 flex items-center justify-center gap-2"
                     >
@@ -158,15 +169,19 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
         )}
       </AnimatePresence>
 
-      {/* ✅ AQUI ESTÁ A MÁGICA: Renderiza o CheckoutModal SE houver plano selecionado */}
-      {checkoutConfig && (
+      {/* RENDERIZA O CHECKOUT POR CIMA SE ESTIVER LOGADO E CLICOU AGORA */}
+      {localCheckout && (
         <CheckoutModal
-          isOpen={!!checkoutConfig}
-          onClose={() => setCheckoutConfig(null)}
-          plan={checkoutConfig.plan}
-          price={checkoutConfig.price}
+          isOpen={!!localCheckout}
+          onClose={() => {
+            setLocalCheckout(null);
+            onClose(); // Fecha tudo quando o checkout é fechado
+          }}
+          plan={localCheckout.plan}
+          price={localCheckout.price}
         />
       )}
     </>
   );
 }
+

@@ -121,3 +121,65 @@ export const financeUnlinkAccount = functions.https.onCall(async (request) => {
     throw new functions.https.HttpsError('internal', 'Erro ao desvincular conta.');
   }
 });
+
+// LINK EXISTING ACCOUNT
+interface LinkAccountRequest {
+  apiKey: string;
+}
+
+export const financeLinkExistingAccount = functions.https.onCall(async (request) => {
+  const data = request.data as LinkAccountRequest;
+  const auth = request.auth;
+
+  if (!auth) throw new functions.https.HttpsError('unauthenticated', 'Login necessário');
+  if (!data.apiKey || !data.apiKey.startsWith('$')) {
+    throw new functions.https.HttpsError('invalid-argument', 'Chave de API inválida (deve começar com $).');
+  }
+
+  try {
+    console.log(`[LINK] Tentando vincular conta para usuário ${auth.uid}...`);
+
+    // 1. Testa a chave consultando os dados da conta comercial
+    // GET /api/v3/myAccount
+    const response = await axios.get(
+      `${ASAAS_CONFIG.baseUrl}/myAccount`,
+      { headers: { 'access_token': data.apiKey } }
+    );
+
+    const accountData = response.data;
+    const walletId = accountData.walletId || accountData.id; // Fallback
+
+    // 2. Salva no Firestore
+    // Marcamos documentos como 'true' pois se a conta já existe, assumimos que já enviou docs pro Asaas
+    await db.collection('users').doc(auth.uid).set({
+      finance: {
+        asaasAccountId: accountData.id,
+        asaasWalletId: walletId,
+        asaasApiKey: data.apiKey,
+        status: 'active',
+        onboardedAt: admin.firestore.FieldValue.serverTimestamp(),
+        linkedExisting: true, // Flag para saber que foi vinculada
+        documents: {
+          docIdSent: true,
+          docSelfieSent: true,
+          lastUpdate: admin.firestore.FieldValue.serverTimestamp()
+        }
+      }
+    }, { merge: true });
+
+    return { 
+      success: true, 
+      accountId: accountData.id,
+      tradingName: accountData.tradingName || accountData.companyName
+    };
+
+  } catch (error: any) {
+    console.error('[LINK ERROR]', error.response?.data || error.message);
+    
+    if (error.response?.status === 401) {
+       throw new functions.https.HttpsError('permission-denied', 'Chave de API incorreta ou revogada.');
+    }
+
+    throw new functions.https.HttpsError('internal', 'Erro ao vincular conta. Verifique a chave.');
+  }
+});

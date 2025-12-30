@@ -4,8 +4,8 @@ import {
   Wallet, FileText, Settings, LogOut, Loader2, 
   ArrowUpRight, ArrowDownLeft, DollarSign, Building2,
   AlertTriangle, CheckCircle2, History,
-  Upload, Camera, Check,
-  Calendar, Info
+  Upload, Camera, Check, ArrowRight,
+  Calendar, Info, Link as LinkIcon, Key, HelpCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
@@ -469,12 +469,43 @@ function SettingsTab({ financeData }: any) {
 // ============================================================================
 
 function OnboardingSection({ user }: any) {
+  const [mode, setMode] = useState<'create' | 'link'>('create');
+  
+  // States para Link
+  const [apiKey, setApiKey] = useState('');
+  const [linking, setLinking] = useState(false);
+
+  // States para Create
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<OnboardFormData>({
     name: '', email: user?.email || '', cpfCnpj: '', birthDate: '', 
     companyType: 'MEI', incomeValue: '', phone: '', postalCode: '', 
     address: '', addressNumber: '', province: '', city: '', state: ''
   });
+
+  const handleLinkAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validação melhorada
+    if (apiKey.length < 20 || !apiKey.includes('$')) {
+      toast.error('Formato de chave inválido. Certifique-se de copiar a chave completa do Asaas.');
+      return;
+    }
+
+    setLinking(true);
+    try {
+      const linkFn = httpsCallable(functions, 'financeLinkExistingAccount');
+      await linkFn({ apiKey: apiKey.trim() });
+      
+      toast.success('Conta conectada com sucesso!');
+      // Pequeno delay para o usuário ler o toast antes de recarregar
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao conectar conta');
+    } finally {
+      setLinking(false);
+    }
+  };
 
   const handleInputChange = (field: keyof OnboardFormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -500,7 +531,6 @@ function OnboardingSection({ user }: any) {
       await onboardFn({ ...formData, birthDate: formattedDate, incomeValue: incomeNumber });
       
       toast.success('Conta criada! Agora envie os documentos.');
-      // O listener do FinanceDashboard vai detectar a mudança do financeData e trocar a tela automaticamente
     } catch (error: any) {
       toast.error(error.message || 'Erro ao criar conta');
     } finally {
@@ -509,65 +539,171 @@ function OnboardingSection({ user }: any) {
   };
 
   return (
-     <div className="bg-[#121212] border border-white/10 rounded-3xl p-6 md:p-10">
-        <div className="mb-10 text-center">
-          <h2 className="text-2xl font-bold mb-2">Bem-vindo ao Financeiro Emprata</h2>
-          <p className="text-white/50">Crie sua conta digital para começar a receber.</p>
-        </div>
-
-        <form onSubmit={handleCreateAccount} className="max-w-3xl mx-auto space-y-6">
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Tipo de Conta</label>
-              <select value={formData.companyType} onChange={(e) => handleInputChange('companyType', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none">
-                {COMPANY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Nome Completo / Razão Social</label>
-              <input required value={formData.name} onChange={(e) => handleInputChange('name', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="João da Silva" />
-            </div>
-          </div>
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <label className="text-xs font-bold text-white/60 mb-2 block uppercase">CPF ou CNPJ</label>
-              <IMaskInput mask={formData.companyType === 'INDIVIDUAL' ? '000.000.000-00' : [{ mask: '000.000.000-00' }, { mask: '00.000.000/0000-00' }] as any} value={formData.cpfCnpj} onAccept={(v: any) => handleInputChange('cpfCnpj', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Data de Nascimento</label>
-              <div className="relative">
-                 <IMaskInput mask="00/00/0000" value={formData.birthDate} onAccept={(v: any) => handleInputChange('birthDate', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="DD/MM/AAAA" />
-                 <Calendar className="absolute right-4 top-3 text-white/20 w-4 h-4 pointer-events-none"/>
-              </div>
-            </div>
-          </div>
-          <div className="grid md:grid-cols-2 gap-6">
-             <div>
-               <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Faturamento Mensal</label>
-               <IMaskInput mask="R$ num" blocks={{ num: { mask: Number, thousandsSeparator: '.', padFractionalZeros: true, radix: ',', mapToRadix: ['.'] } } as any} value={formData.incomeValue} onAccept={(v: any) => handleInputChange('incomeValue', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="R$ 0,00" />
-             </div>
-             <div>
-               <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Email</label>
-               <input type="email" required value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
-             </div>
-          </div>
-           {/* Endereço Simplificado para economizar espaço visual no código, mas funcional */}
-          <div className="grid md:grid-cols-3 gap-4">
-             <input placeholder="CEP" value={formData.postalCode} onChange={(e) => handleInputChange('postalCode', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-             <input placeholder="Endereço" value={formData.address} onChange={(e) => handleInputChange('address', e.target.value)} className="md:col-span-2 bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-          </div>
-          <div className="grid md:grid-cols-4 gap-4">
-             <input placeholder="Número" value={formData.addressNumber} onChange={(e) => handleInputChange('addressNumber', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-             <input placeholder="Bairro" value={formData.province} onChange={(e) => handleInputChange('province', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-             <input placeholder="Cidade" value={formData.city} onChange={(e) => handleInputChange('city', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-             <input placeholder="UF" maxLength={2} value={formData.state} onChange={(e) => handleInputChange('state', e.target.value.toUpperCase())} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-          </div>
-          
-          <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2">
-            {isSubmitting ? <Loader2 className="animate-spin" /> : 'Criar Conta Financeira'}
+    <div className="bg-[#121212] border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
+       {/* ABAS DE NAVEGAÇÃO */}
+       <div className="grid grid-cols-2 border-b border-white/10">
+          <button 
+            type="button"
+            onClick={() => setMode('create')}
+            className={`p-6 text-sm font-bold uppercase tracking-widest transition-all ${
+               mode === 'create' 
+               ? 'bg-primary/10 text-primary border-b-2 border-primary' 
+               : 'text-white/40 hover:bg-white/5'
+            }`}
+          >
+            Não tenho conta
           </button>
-        </form>
-     </div>
+          <button 
+            type="button"
+            onClick={() => setMode('link')}
+            className={`p-6 text-sm font-bold uppercase tracking-widest transition-all ${
+               mode === 'link' 
+               ? 'bg-blue-500/10 text-blue-500 border-b-2 border-blue-500' 
+               : 'text-white/40 hover:bg-white/5'
+            }`}
+          >
+            Já tenho conta Asaas
+          </button>
+       </div>
+
+       <div className="p-8 md:p-10 min-h-[400px]">
+          
+          {/* MODO 1: CRIAR NOVA */}
+          {mode === 'create' && (
+             <div className="animate-in fade-in slide-in-from-left-4">
+                <div className="mb-8 text-center">
+                   <h2 className="text-2xl font-black italic mb-2 text-white">Criar Conta Digital</h2>
+                   <p className="text-white/40">Abra sua conta gratuita para receber pagamentos hoje mesmo.</p>
+                </div>
+                
+                <form onSubmit={handleCreateAccount} className="max-w-3xl mx-auto space-y-6">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Tipo de Conta</label>
+                      <select value={formData.companyType} onChange={(e) => handleInputChange('companyType', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none">
+                        {COMPANY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Nome / Razão Social</label>
+                      <input required value={formData.name} onChange={(e) => handleInputChange('name', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="João da Silva" />
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">CPF ou CNPJ</label>
+                      <IMaskInput mask={formData.companyType === 'INDIVIDUAL' ? '000.000.000-00' : [{ mask: '000.000.000-00' }, { mask: '00.000.000/0000-00' }] as any} value={formData.cpfCnpj} onAccept={(v: any) => handleInputChange('cpfCnpj', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Data de Nascimento</label>
+                      <div className="relative">
+                         <IMaskInput mask="00/00/0000" value={formData.birthDate} onAccept={(v: any) => handleInputChange('birthDate', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="DD/MM/AAAA" />
+                         <Calendar className="absolute right-4 top-3 text-white/20 w-4 h-4 pointer-events-none"/>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-2 gap-6">
+                     <div>
+                       <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Faturamento Mensal</label>
+                       <IMaskInput mask="R$ num" blocks={{ num: { mask: Number, thousandsSeparator: '.', padFractionalZeros: true, radix: ',', mapToRadix: ['.'] } } as any} value={formData.incomeValue} onAccept={(v: any) => handleInputChange('incomeValue', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="R$ 0,00" />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Email</label>
+                       <input type="email" required value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
+                     </div>
+                  </div>
+                  <div className="grid md:grid-cols-3 gap-4">
+                     <input placeholder="CEP" value={formData.postalCode} onChange={(e) => handleInputChange('postalCode', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
+                     <input placeholder="Endereço" value={formData.address} onChange={(e) => handleInputChange('address', e.target.value)} className="md:col-span-2 bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
+                  </div>
+                  <div className="grid md:grid-cols-4 gap-4">
+                     <input placeholder="Número" value={formData.addressNumber} onChange={(e) => handleInputChange('addressNumber', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
+                     <input placeholder="Bairro" value={formData.province} onChange={(e) => handleInputChange('province', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
+                     <input placeholder="Cidade" value={formData.city} onChange={(e) => handleInputChange('city', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
+                     <input placeholder="UF" maxLength={2} value={formData.state} onChange={(e) => handleInputChange('state', e.target.value.toUpperCase())} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
+                  </div>
+                  
+                  <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2">
+                    {isSubmitting ? <Loader2 className="animate-spin" /> : 'Criar Conta Financeira'}
+                  </button>
+                </form>
+             </div>
+          )}
+
+          {/* MODO 2: VINCULAR EXISTENTE (Layout Intuitivo com Tutorial) */}
+          {mode === 'link' && (
+             <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-right-4">
+                <div className="text-center mb-10">
+                   <div className="w-20 h-20 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-500/10">
+                      <LinkIcon className="w-10 h-10" />
+                   </div>
+                   <h2 className="text-3xl font-black italic mb-3 text-white">Conectar Asaas</h2>
+                   <p className="text-white/50 text-lg">
+                      Utilize sua conta existente para gerenciar tudo pelo Emprata.
+                   </p>
+                </div>
+
+                <div className="grid md:grid-cols-2 gap-8 mb-8">
+                   {/* Coluna Instruções */}
+                   <div className="bg-white/5 p-6 rounded-2xl border border-white/5">
+                      <h4 className="font-bold text-white mb-4 flex items-center gap-2">
+                         <HelpCircle className="w-4 h-4 text-blue-400"/> Como pegar a chave?
+                      </h4>
+                      <ol className="space-y-4 text-sm text-white/60">
+                         <li className="flex gap-3">
+                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">1</span>
+                            <span>Acesse o painel do Asaas no computador.</span>
+                         </li>
+                         <li className="flex gap-3">
+                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">2</span>
+                            <span>Vá no menu <strong className="text-white">Configurações</strong> e depois em <strong className="text-white">Integrações</strong>.</span>
+                         </li>
+                         <li className="flex gap-3">
+                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">3</span>
+                            <span>Clique em <strong className="text-white">"Gerar nova chave de API"</strong>.</span>
+                         </li>
+                         <li className="flex gap-3">
+                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">4</span>
+                            <span>Copie a chave inteira (começa com <code className="text-blue-400">$</code>) e cole ao lado.</span>
+                         </li>
+                      </ol>
+                   </div>
+
+                   {/* Coluna Formulário */}
+                   <form onSubmit={handleLinkAccount} className="flex flex-col justify-center space-y-4">
+                      <div className="space-y-2">
+                         <label className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
+                            <Key className="w-4 h-4" /> Cole sua Chave API Aqui
+                         </label>
+                         <textarea 
+                            required
+                            rows={3}
+                            placeholder="$aact_..."
+                            value={apiKey}
+                            onChange={e => setApiKey(e.target.value)}
+                            className="w-full bg-black border border-white/10 rounded-xl p-4 text-white focus:border-blue-500 outline-none font-mono text-xs resize-none"
+                         />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={linking || apiKey.length < 10}
+                        className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-600/20"
+                      >
+                        {linking ? <Loader2 className="animate-spin" /> : (
+                           <>Conectar Agora <ArrowRight className="w-4 h-4" /></>
+                        )}
+                      </button>
+                   </form>
+                </div>
+                
+                <p className="text-center text-xs text-white/20">
+                   Seus dados são criptografados e utilizados apenas para processar pagamentos na plataforma.
+                </p>
+             </div>
+          )}
+       </div>
+    </div>
   );
 }
 

@@ -39,6 +39,33 @@ import ConsumerProfile from './pages/marketplace/ConsumerProfile';
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
 import NetworkStatus from './components/NetworkStatus';
+import CheckoutModal from './components/CheckoutModal';
+
+// Hooks
+import { usePendingCheckout } from './hooks/usePendingCheckout';
+
+// ============================================================================
+// AUTH WRAPPER - Monitora checkout pendente após login
+// ============================================================================
+function AuthWrapper({ children }: { children: React.ReactNode }) {
+  const { pendingPlan, clearPending } = usePendingCheckout();
+
+  return (
+    <>
+      {children}
+      
+      {/* SE HOUVER PLANO PENDENTE APÓS LOGIN, O MODAL APARECE AQUI */}
+      {pendingPlan && (
+        <CheckoutModal
+          isOpen={!!pendingPlan}
+          onClose={clearPending}
+          plan={pendingPlan.plan}
+          price={pendingPlan.price}
+        />
+      )}
+    </>
+  );
+}
 
 export default function App() {
   return (
@@ -55,6 +82,7 @@ export default function App() {
         }}
       />
       
+      <AuthWrapper>
       <Routes>
         {/* ══════════════════════════════════════════════════════════ */}
         {/* ROTAS PÚBLICAS (Sem Layout) */}
@@ -156,6 +184,7 @@ export default function App() {
         {/* 404 */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </AuthWrapper>
     </Router>
   );
 }
