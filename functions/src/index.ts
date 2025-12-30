@@ -24,6 +24,8 @@ export * from "./asaas/webhook";
 export * from "./asaas/subscribe";
 export * from "./asaas/wallet";
 export * from "./asaas/documents";
+export * from "./asaas/bank";      // saveWithdrawAccount, getWithdrawAccount
+export * from "./asaas/security";  // Funções de segurança
 
 // ============================================================================
 // UTILS

@@ -1,1026 +1,401 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../config/firebase';
+import { useAuth } from '../../hooks/useAuth';
 import { 
-  Wallet, FileText, Settings, LogOut, Loader2, 
-  ArrowUpRight, ArrowDownLeft, DollarSign, Building2,
-  AlertTriangle, CheckCircle2, History,
-  Upload, Camera, Check, ArrowRight,
-  Calendar, Info, Link as LinkIcon, Key, HelpCircle
+  Building2, Wallet, ArrowUpRight, History, 
+  AlertTriangle, Lock, CalendarClock, Settings, Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { httpsCallable } from 'firebase/functions';
-import { doc, onSnapshot, collection, query, orderBy, limit, getDocs } from 'firebase/firestore';
-import { functions, db } from '../../config/firebase';
-import { useAuth } from '../../hooks/useAuth';
-import { formatCurrency } from '../../utils/format';
-import { IMaskInput } from 'react-imask';
-
-// ============================================================================
-// TIPOS E CONSTANTES
-// ============================================================================
-
-interface OnboardFormData {
-  name: string;
-  email: string;
-  cpfCnpj: string;
-  birthDate: string;
-  companyType: string;
-  incomeValue: string;
-  phone: string;
-  postalCode: string;
-  address: string;
-  addressNumber: string;
-  province: string;
-  city: string;
-  state: string;
-}
-
-const COMPANY_TYPES = [
-  { value: 'MEI', label: 'MEI (Microempreendedor Individual)' },
-  { value: 'LIMITED', label: 'LTDA (Limitada)' },
-  { value: 'INDIVIDUAL', label: 'Pessoa Física (CPF)' },
-  { value: 'ASSOCIATION', label: 'Associação / ONG' },
-];
-
-// ============================================================================
-// COMPONENTE PRINCIPAL
-// ============================================================================
 
 export default function FinanceDashboard() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [financeData, setFinanceData] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'wallet' | 'extract' | 'settings'>('wallet');
-
-  // Listeners
-  useEffect(() => {
-    if (!user?.uid) return;
-    const unsub = onSnapshot(doc(db, 'users', user.uid), (doc) => {
-      setFinanceData(doc.data()?.finance);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [user]);
-
-  // Se carregando
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-black"><Loader2 className="animate-spin text-primary w-8 h-8"/></div>;
-
-  // Lógica de Estado: Qual tela mostrar?
-  const hasAccount = !!financeData?.asaasAccountId;
   
-  // Verificação de documentos: precisa ter enviado ID e Selfie
-  const hasDocs = financeData?.documents?.docIdSent && financeData?.documents?.docSelfieSent;
-
-  return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-8 pb-32">
-      <div className="max-w-5xl mx-auto">
-        
-        {/* HEADER GERAL */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-          <div>
-<h1 className="text-3xl font-black italic tracking-tighter text-red-500">
-  TESTE DE DEPLOY <span className="text-primary">V2</span>
-</h1>
-            <p className="text-white/40 text-sm">Gestão completa da sua conta digital.</p>
-          </div>
-
-          {/* Se tiver conta E documentos OK, mostra abas */}
-          {hasAccount && hasDocs && (
-            <div className="flex bg-[#121212] p-1 rounded-xl border border-white/10">
-              <TabButton active={activeTab === 'wallet'} onClick={() => setActiveTab('wallet')} icon={Wallet} label="Carteira" />
-              <TabButton active={activeTab === 'extract'} onClick={() => setActiveTab('extract')} icon={FileText} label="Extrato" />
-              <TabButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={Settings} label="Ajustes" />
-            </div>
-          )}
-          
-          {/* Se tiver conta mas faltar documentos, pode mostrar botão de Logout/Ajustes caso queira cancelar */}
-           {hasAccount && !hasDocs && (
-             <div className="flex bg-[#121212] p-1 rounded-xl border border-white/10">
-                <button
-                  onClick={() => {
-                     const confirm = window.confirm("Deseja desconectar esta conta pendente?");
-                     if(confirm) {
-                        const fn = httpsCallable(functions, 'financeUnlinkAccount');
-                        fn().then(() => window.location.reload());
-                     }
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-red-500 hover:bg-red-500/10 transition-colors"
-                >
-                  <LogOut className="w-4 h-4" /> Cancelar
-                </button>
-             </div>
-           )}
-        </div>
-
-        {/* CONTEÚDO DINÂMICO */}
-        <AnimatePresence mode="wait">
-          
-          {/* ESTADO 1: SEM CONTA (ONBOARDING) */}
-          {!hasAccount && (
-            <motion.div key="onboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-               <OnboardingSection user={user} />
-            </motion.div>
-          )}
-
-          {/* ESTADO 2: FALTA DOCUMENTOS */}
-          {hasAccount && !hasDocs && (
-             <motion.div key="docs" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-               <DocumentsSection financeData={financeData} />
-             </motion.div>
-          )}
-
-          {/* ESTADO 3: CONTA ATIVA (DASHBOARD) */}
-          {hasAccount && hasDocs && (
-            <motion.div 
-              key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.2 }}
-            >
-              {activeTab === 'wallet' && <WalletTab />}
-              {activeTab === 'extract' && <ExtractTab />}
-              {activeTab === 'settings' && <SettingsTab financeData={financeData} />}
-            </motion.div>
-          )}
-
-        </AnimatePresence>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// COMPONENTES PRINCIPAIS (ABAS)
-// ============================================================================
-
-function TabButton({ active, onClick, icon: Icon, label }: any) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-        active ? 'bg-white/10 text-white shadow-lg' : 'text-white/40 hover:text-white hover:bg-white/5'
-      }`}
-    >
-      <Icon className="w-4 h-4" />
-      {label}
-    </button>
-  );
-}
-
-// --- ABA 1: CARTEIRA (Saldo + Saque White Label) ---
-function WalletTab() {
-  const [balance, setBalance] = useState({ 
-    available: 0, 
-    toReceive: 0, 
-    pending: 0, 
-    withdrawFee: 5, 
-    hasWithdrawAccount: false,
-    isLocked: false,
-    hoursUntilUnlock: 0
+  // Estados de Dados
+  const [loading, setLoading] = useState(true);
+  const [financialData, setFinancialData] = useState({
+    available: 0,
+    toReceive: 0,
+    pending: 0
   });
-  const [loading, setLoading] = useState(true);
-  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [hide, setHide] = useState(false);
   
-  // States do Saque
-  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  // Estados de UI
+  const [activeTab, setActiveTab] = useState<'overview' | 'settings'>('overview');
+  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
-
-  // States de Configuração Pix
-  const [configLoading, setConfigLoading] = useState(false);
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  const [saveLoading, setSaveLoading] = useState(false);
+  
+  // Estados de Configuração Bancária
   const [pixKey, setPixKey] = useState('');
-  const [pixKeyType, setPixKeyType] = useState<'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP'>('CPF');
-  const [savedPixKey, setSavedPixKey] = useState<string | null>(null);
+  const [pixKeyType, setPixKeyType] = useState('CPF');
+  const [isLocked, setIsLocked] = useState(false);
+  const [hoursUntilUnlock, setHoursUntilUnlock] = useState(0);
 
+  // 1. Busca Saldo Inteligente (Enterprise)
   const fetchBalance = async () => {
-     try {
-       const fn = httpsCallable(functions, 'financeGetBalance');
-       const res: any = await fn();
-       setBalance({ 
-          available: res.data.available || res.data.balance || 0, 
-          toReceive: res.data.toReceive || 0,
-          pending: res.data.pending || 0,
-          withdrawFee: res.data.withdrawFee || 5,
-          hasWithdrawAccount: res.data.hasWithdrawAccount || false,
-          isLocked: res.data.isLocked || false,
-          hoursUntilUnlock: res.data.hoursUntilUnlock || 0
-        });
-       
-       // Buscar dados da conta de saque
-       const accountFn = httpsCallable(functions, 'getWithdrawAccount');
-       const accRes: any = await accountFn();
-       if (accRes.data.exists) {
-         setSavedPixKey(accRes.data.data.pixKey);
-         setPixKeyType(accRes.data.data.pixKeyType);
-       }
-     } catch(e) { console.error(e) } finally { setLoading(false) }
+    try {
+      const getBalance = httpsCallable(functions, 'financeGetBalance');
+      const result: any = await getBalance();
+      
+      setFinancialData({
+        available: result.data.available || result.data.balance || 0,
+        toReceive: result.data.toReceive || 0,
+        pending: result.data.pending || 0
+      });
+
+      // Verifica trava de segurança
+      if (result.data.isLocked) {
+        setIsLocked(true);
+        setHoursUntilUnlock(result.data.hoursUntilUnlock || 0);
+      }
+
+      // Busca conta de saque salva
+      const getAccount = httpsCallable(functions, 'getWithdrawAccount');
+      const accResult: any = await getAccount();
+      if (accResult.data.exists) {
+        setPixKey(accResult.data.data.pixKey || '');
+        setPixKeyType(accResult.data.data.pixKeyType || 'CPF');
+      }
+      if (accResult.data.isLocked) {
+        setIsLocked(true);
+        setHoursUntilUnlock(accResult.data.hoursUntilUnlock || 0);
+      }
+
+    } catch (error) {
+      console.error("Erro ao buscar saldo:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     fetchBalance();
-  }, []);
+  }, [user]);
 
-  const handleSavePixConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setConfigLoading(true);
-
-    try {
-      const saveFn = httpsCallable(functions, 'saveWithdrawAccount');
-      await saveFn({ pixKey, pixKeyType });
-      
-      toast.success('✅ Conta de recebimento configurada!');
-      setSavedPixKey(pixKey);
-      setIsConfigModalOpen(false);
-      fetchBalance();
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao salvar');
-    } finally {
-      setConfigLoading(false);
-    }
-  };
-
-  const handleWithdraw = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setWithdrawLoading(true);
-
-    const amountNumber = parseFloat(withdrawAmount.replace(/[^0-9,]/g, '').replace(',', '.'));
-
-    if (amountNumber > (balance.available - balance.withdrawFee)) {
-      toast.error(`Saldo insuficiente. Taxa de saque: R$ ${balance.withdrawFee.toFixed(2)}`);
-      setWithdrawLoading(false);
+  // 2. Função de Saque
+  const handleWithdraw = async () => {
+    if (!withdrawAmount) return;
+    const amount = parseFloat(withdrawAmount.replace(',', '.'));
+    
+    if (amount > financialData.available) {
+      toast.error('Saldo insuficiente.');
       return;
     }
 
+    setWithdrawLoading(true);
     try {
-      const withdrawFn = httpsCallable(functions, 'financeWithdraw');
-      const res: any = await withdrawFn({ amount: amountNumber });
+      const withdraw = httpsCallable(functions, 'financeWithdraw');
+      const res: any = await withdraw({ amount });
       
-      toast.success(`💸 ${res.data.message}`);
-      setIsWithdrawModalOpen(false);
+      toast.success(res.data.message || 'Saque solicitado com sucesso!');
+      setWithdrawModalOpen(false);
       setWithdrawAmount('');
       fetchBalance();
     } catch (error: any) {
-      toast.error(error.message || 'Erro ao realizar saque');
+      console.error(error);
+      const msg = error.message || 'Erro ao processar saque';
+      
+      if (msg.includes('bloqueado') || msg.includes('Bloqueado')) {
+         toast.error('Saque bloqueado por segurança (Troca de Chave Recente).');
+      } else {
+         toast.error(msg);
+      }
     } finally {
       setWithdrawLoading(false);
     }
   };
 
-  if (loading) return <div className="p-10 text-center"><Loader2 className="animate-spin mx-auto text-primary"/></div>;
+  // 3. Salvar Conta Bancária (Com Trava de Segurança)
+  const handleSaveBank = async () => {
+    if (!pixKey) {
+      toast.error('Informe a chave Pix.');
+      return;
+    }
+
+    setSaveLoading(true);
+    try {
+      const saveAccount = httpsCallable(functions, 'saveWithdrawAccount');
+      const result: any = await saveAccount({ pixKey, pixKeyType });
+      
+      toast.success(result.data.message);
+      if (result.data.locked) {
+        setIsLocked(true);
+        setHoursUntilUnlock(24);
+      }
+      
+    } catch (error) {
+      toast.error('Erro ao salvar conta.');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Formatador de moeda
+  const formatCurrency = (value: number) => 
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <>
-      {/* AVISO DE TRAVA DE SEGURANÇA */}
-      {balance.isLocked && (
-        <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center gap-4">
-          <div className="p-3 bg-red-500/20 rounded-xl">
-            <AlertTriangle className="w-6 h-6 text-red-500" />
-          </div>
+    <div className="min-h-screen bg-black text-white p-6 pb-32">
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        {/* Cabeçalho */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <p className="font-bold text-red-400">Saques Bloqueados Temporariamente</p>
-            <p className="text-sm text-white/60">
-              Por segurança, após alterar a chave Pix os saques ficam bloqueados por 24h.
-              Restam <strong className="text-white">{balance.hoursUntilUnlock} horas</strong>.
-            </p>
+            <h1 className="text-3xl font-black italic tracking-tighter">
+              <span className="text-primary">Gestão</span> Financeira
+            </h1>
+            <p className="text-white/40">Controle seu fluxo de caixa e saques.</p>
+          </div>
+          <div className="flex gap-2 bg-[#121212] p-1 rounded-xl border border-white/10">
+            <button 
+              onClick={() => setActiveTab('overview')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+                activeTab === 'overview' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'
+              }`}
+            >
+              <Wallet className="w-4 h-4 inline mr-2" />
+              Visão Geral
+            </button>
+            <button 
+              onClick={() => setActiveTab('settings')}
+              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+                activeTab === 'settings' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'
+              }`}
+            >
+              <Settings className="w-4 h-4 inline mr-2" />
+              Conta de Saque
+            </button>
           </div>
         </div>
-      )}
 
-      <div className="grid md:grid-cols-3 gap-6">
-         {/* Card Saldo Disponível */}
-         <div className="bg-gradient-to-br from-[#1a1a1a] to-black border border-white/10 rounded-3xl p-8 relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-primary/10 transition-colors" />
-            <div className="relative z-10">
-              <p className="text-sm font-bold text-white/40 uppercase tracking-widest mb-1">Saldo Disponível</p>
-              <h2 className="text-4xl font-black text-white mb-6 cursor-pointer" onClick={() => setHide(!hide)}>
-                 {hide ? '••••••' : formatCurrency(balance.available)}
-              </h2>
+        {/* Aviso de Trava de Segurança */}
+        {isLocked && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center gap-4">
+            <div className="p-3 bg-red-500/20 rounded-xl">
+              <Lock className="w-6 h-6 text-red-500" />
+            </div>
+            <div>
+              <p className="font-bold text-red-400">Saques Bloqueados Temporariamente</p>
+              <p className="text-sm text-white/60">
+                Por segurança, após alterar a chave Pix os saques ficam bloqueados por 24h.
+                Restam <strong className="text-white">{hoursUntilUnlock} horas</strong>.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'overview' && (
+          <>
+            {/* Cards Enterprise */}
+            <div className="grid gap-6 md:grid-cols-3">
+              
+              {/* Card 1: Disponível */}
+              <div className="bg-gradient-to-br from-[#1a1a1a] to-black border border-white/10 rounded-3xl p-8 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <Wallet size={80} className="text-primary" />
+                </div>
+                <p className="text-sm font-bold text-primary uppercase tracking-widest mb-1 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                  Disponível para Saque
+                </p>
+                <h2 className="text-4xl font-black text-white mb-4">
+                  {formatCurrency(financialData.available)}
+                </h2>
+                <button 
+                  onClick={() => pixKey ? setWithdrawModalOpen(true) : setActiveTab('settings')}
+                  disabled={isLocked}
+                  className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-sm uppercase transition-colors ${
+                    isLocked 
+                      ? 'bg-gray-600 text-white/50 cursor-not-allowed' 
+                      : 'bg-primary hover:bg-orange-600 text-white'
+                  }`}
+                >
+                  {isLocked ? <Lock size={16} /> : <ArrowUpRight size={16} />}
+                  {isLocked ? `Bloqueado (${hoursUntilUnlock}h)` : (pixKey ? 'Sacar Pix' : 'Configurar Conta')}
+                </button>
+              </div>
+
+              {/* Card 2: A Receber (Futuro) */}
+              <div className="bg-[#121212] border border-white/10 rounded-3xl p-8 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                  <CalendarClock size={80} className="text-blue-500" />
+                </div>
+                <p className="text-sm font-bold text-blue-500 uppercase tracking-widest mb-1">A Receber (Crédito)</p>
+                <h2 className="text-4xl font-black text-blue-400 mb-4">
+                  {formatCurrency(financialData.toReceive)}
+                </h2>
+                <p className="text-xs text-white/30">
+                  Vendas no cartão de crédito aguardando liberação (D+30).
+                </p>
+              </div>
+
+              {/* Card 3: Status da Conta */}
+              <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
+                <p className="text-sm font-bold text-white/40 uppercase tracking-widest mb-2">Status da Conta</p>
+                <div className="flex items-center gap-2 mb-4">
+                  <Building2 className="text-green-500" />
+                  <span className="font-bold text-white">Conta Emprata Ativa</span>
+                </div>
+                
+                {pixKey ? (
+                  <div className="bg-black/50 rounded-xl p-3 mb-4">
+                    <p className="text-xs text-white/40 mb-1">Chave Pix ({pixKeyType})</p>
+                    <p className="font-mono text-white text-sm font-bold truncate">{pixKey}</p>
+                  </div>
+                ) : (
+                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 mb-4">
+                    <p className="text-xs text-yellow-200/80">
+                      Configure sua chave Pix para poder sacar.
+                    </p>
+                  </div>
+                )}
+
+                <div className="pt-4 border-t border-white/5">
+                  <p className="text-xs text-white/30">
+                    Seu dinheiro está seguro e segregado conforme normas do Bacen.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Histórico Recente */}
+            <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
+              <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                <History size={20} className="text-white/40" />
+                Últimas Movimentações
+              </h3>
+              <div className="text-center py-10 text-white/30 text-sm bg-black/50 rounded-xl border border-dashed border-white/10">
+                O histórico de transações aparecerá aqui assim que houver movimentações.
+              </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="bg-[#121212] border border-white/10 max-w-2xl mx-auto rounded-3xl p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-primary/20 rounded-xl">
+                <Settings className="text-primary" size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-white">Conta de Recebimento</h2>
+                <p className="text-sm text-white/40">Para onde enviamos seu dinheiro quando você saca.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Tipo de Chave Pix</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {(['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'] as const).map((type) => (
+                    <button
+                      key={type}
+                      onClick={() => setPixKeyType(type)}
+                      className={`py-2 rounded-lg text-xs font-bold border transition-colors ${
+                        pixKeyType === type 
+                          ? 'bg-primary text-white border-primary' 
+                          : 'bg-transparent text-white/40 border-white/10 hover:bg-white/5'
+                      }`}
+                    >
+                      {type === 'EVP' ? 'Aleat.' : type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Chave Pix</label>
+                <input 
+                  type="text" 
+                  value={pixKey}
+                  onChange={(e) => setPixKey(e.target.value)}
+                  placeholder={`Digite seu ${pixKeyType === 'EVP' ? 'código aleatório' : pixKeyType}`}
+                  className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
+                />
+              </div>
+
+              {isLocked && (
+                <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 text-yellow-200 rounded-xl flex gap-3 text-sm">
+                  <AlertTriangle size={20} className="shrink-0 text-yellow-500" />
+                  <p>
+                    <strong>Modo de Segurança Ativo:</strong> Após salvar uma nova chave, 
+                    saques ficarão bloqueados por 24 horas.
+                  </p>
+                </div>
+              )}
+
               <button 
-                onClick={() => balance.isLocked ? toast.error(`Bloqueado por ${balance.hoursUntilUnlock}h`) : (savedPixKey ? setIsWithdrawModalOpen(true) : setIsConfigModalOpen(true))} 
-                disabled={balance.isLocked}
-                className={`w-full py-3 rounded-xl font-bold text-sm uppercase flex items-center justify-center gap-2 transition-colors ${
-                  balance.isLocked 
-                    ? 'bg-gray-600 cursor-not-allowed opacity-50' 
-                    : 'bg-primary hover:bg-orange-600'
-                }`}
+                onClick={handleSaveBank}
+                disabled={saveLoading}
+                className="w-full py-4 bg-primary hover:bg-orange-600 text-white rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                 <ArrowUpRight className="w-4 h-4"/> {balance.isLocked ? 'Bloqueado' : 'Sacar Pix'}
+                {saveLoading ? <Loader2 className="animate-spin" /> : 'Salvar Conta Bancária'}
               </button>
             </div>
-         </div>
+          </div>
+        )}
 
-         {/* Card A Receber */}
-         <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
-            <div className="flex items-center gap-2 mb-2">
-               <div className="p-2 bg-blue-500/10 rounded-lg"><DollarSign className="w-4 h-4 text-blue-500"/></div>
-               <p className="text-sm font-bold text-white/40 uppercase">A Receber</p>
-            </div>
-            <p className="text-3xl font-bold text-blue-400">{hide ? '••••••' : formatCurrency(balance.toReceive)}</p>
-            <p className="text-xs text-white/30 mt-2">Vendas no cartão de crédito aguardando liquidação (D+30).</p>
-         </div>
-
-         {/* Card Conta de Recebimento */}
-         <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
-            <div className="flex items-center justify-between mb-4">
-               <div className="flex items-center gap-2">
-                  <div className={`p-2 rounded-lg ${savedPixKey ? 'bg-green-500/10' : 'bg-yellow-500/10'}`}>
-                    {savedPixKey ? <CheckCircle2 className="w-4 h-4 text-green-500"/> : <AlertTriangle className="w-4 h-4 text-yellow-500"/>}
-                  </div>
-                  <p className="text-sm font-bold text-white/80">Conta de Saque</p>
-               </div>
-               <button 
-                 onClick={() => setIsConfigModalOpen(true)}
-                 className="text-xs font-bold text-primary hover:underline"
-               >
-                 {savedPixKey ? 'Alterar' : 'Configurar'}
-               </button>
-            </div>
-            
-            {savedPixKey ? (
-              <div className="bg-black/50 rounded-xl p-3">
-                <p className="text-xs text-white/40 mb-1">Chave Pix ({pixKeyType})</p>
-                <p className="font-mono text-white text-sm font-bold truncate">{savedPixKey}</p>
-              </div>
-            ) : (
-              <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-3">
-                <p className="text-xs text-yellow-200/80">
-                  Configure sua chave Pix para poder sacar.
+        {/* Modal de Saque */}
+        {withdrawModalOpen && (
+          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="bg-[#121212] border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-2xl">
+              <h3 className="text-2xl font-black italic uppercase mb-6">Realizar Saque</h3>
+              
+              <div className="mb-6">
+                <p className="text-sm text-white/40 mb-1">Disponível</p>
+                <p className="text-3xl font-black text-primary">
+                  {formatCurrency(financialData.available)}
                 </p>
               </div>
-            )}
 
-            <div className="mt-3 pt-3 border-t border-white/5">
-              <div className="flex justify-between text-xs">
-                <span className="text-white/40">Taxa de saque:</span>
-                <span className="text-white font-bold">R$ {balance.withdrawFee.toFixed(2)}</span>
+              <div className="mb-4">
+                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Enviar para</label>
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3">
+                  <p className="font-mono text-green-400 font-bold">{pixKey}</p>
+                </div>
               </div>
-            </div>
-         </div>
-      </div>
 
+              <div className="mb-6">
+                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Valor do Saque</label>
+                <input 
+                  type="number"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  placeholder="0,00"
+                  className="w-full bg-black border border-white/10 rounded-xl px-4 py-4 text-2xl font-bold text-white focus:border-primary outline-none"
+                />
+                <p className="text-xs text-white/30 mt-2">Taxa de transferência: R$ 5,00 (descontado do saldo)</p>
+              </div>
 
-      {/* MODAL DE CONFIGURAÇÃO PIX */}
-      <AnimatePresence>
-          {isConfigModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <motion.div 
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => setIsConfigModalOpen(false)}
-                className="absolute inset-0 bg-black/90 backdrop-blur-sm"
-              />
-              <motion.div 
-                initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-                className="relative bg-[#121212] border border-white/10 w-full max-w-md rounded-3xl p-6 md:p-8 shadow-2xl"
-              >
-                <div className="flex justify-between items-start mb-6">
-                   <div>
-                      <h3 className="text-2xl font-black italic uppercase mb-1">Conta de Recebimento</h3>
-                      <p className="text-white/40 text-sm">Configure para onde enviar seus saques.</p>
-                   </div>
-                   <button onClick={() => setIsConfigModalOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10">
-                     <ArrowDownLeft className="w-4 h-4 rotate-45" />
-                   </button>
-                </div>
-
-                <form onSubmit={handleSavePixConfig} className="space-y-4">
-                  <div className="grid grid-cols-5 gap-2">
-                     {(['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'] as const).map(type => (
-                       <button
-                         key={type} type="button"
-                         onClick={() => setPixKeyType(type)}
-                         className={`py-2 rounded-lg text-xs font-bold border transition-colors ${pixKeyType === type ? 'bg-primary text-white border-primary' : 'bg-transparent text-white/40 border-white/10 hover:bg-white/5'}`}
-                       >
-                         {type === 'EVP' ? 'Aleatória' : type}
-                       </button>
-                     ))}
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-white/50 uppercase">Chave Pix</label>
-                    <input 
-                      value={pixKey}
-                      onChange={(e) => setPixKey(e.target.value)}
-                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
-                      placeholder={`Digite seu ${pixKeyType === 'EVP' ? 'código aleatório' : pixKeyType}`}
-                      required
-                    />
-                  </div>
-
-                  <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-xl flex gap-3 items-start">
-                    <Info className="w-5 h-5 text-blue-500 shrink-0" />
-                    <p className="text-xs text-blue-200/70">
-                      Esta é a conta para onde seu dinheiro será enviado. Certifique-se de que está correta.
-                    </p>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={configLoading || !pixKey}
-                    className="w-full py-4 bg-primary hover:bg-orange-600 rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {configLoading ? <Loader2 className="animate-spin" /> : 'Salvar Conta'}
-                  </button>
-                </form>
-              </motion.div>
-            </div>
-      )}
-      </AnimatePresence>
-
-      {/* MODAL DE SAQUE */}
-      <AnimatePresence>
-          {isWithdrawModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <motion.div 
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => setIsWithdrawModalOpen(false)}
-                className="absolute inset-0 bg-black/90 backdrop-blur-sm"
-              />
-              <motion.div 
-                initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }}
-                className="relative bg-[#121212] border border-white/10 w-full max-w-md rounded-3xl p-6 md:p-8 shadow-2xl"
-              >
-                <div className="flex justify-between items-start mb-6">
-                   <div>
-                      <h3 className="text-2xl font-black italic uppercase mb-1">Sacar Dinheiro</h3>
-                      <p className="text-white/40 text-sm">Transferência Pix instantânea.</p>
-                   </div>
-                   <button onClick={() => setIsWithdrawModalOpen(false)} className="p-2 bg-white/5 rounded-full hover:bg-white/10">
-                     <ArrowDownLeft className="w-4 h-4 rotate-45" />
-                   </button>
-                </div>
-
-                {/* Destino do Saque */}
-                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 mb-6">
-                  <p className="text-xs text-white/50 mb-1">Enviar para:</p>
-                  <p className="font-mono text-green-400 font-bold">{savedPixKey}</p>
-                </div>
-
-                <form onSubmit={handleWithdraw} className="space-y-4">
-                  <div>
-                    <label className="text-xs font-bold text-white/50 uppercase">Valor do Saque</label>
-                    <IMaskInput
-                      mask="R$ num"
-                      blocks={{
-                        num: { mask: Number, thousandsSeparator: '.', padFractionalZeros: true, radix: ',', scale: 2 }
-                      } as any}
-                      value={withdrawAmount}
-                      onAccept={(val: any) => setWithdrawAmount(val)}
-                      className="w-full bg-black border border-white/10 rounded-xl px-4 py-4 text-2xl font-bold text-white focus:border-primary outline-none"
-                      placeholder="R$ 0,00"
-                    />
-                    <div className="flex justify-between mt-1 text-xs">
-                       <span className="text-white/30">Disponível: {formatCurrency(balance.available - balance.withdrawFee)}</span>
-                       <button 
-                         type="button" 
-                         onClick={() => setWithdrawAmount(Math.max(0, balance.available - balance.withdrawFee).toFixed(2).replace('.',','))} 
-                         className="text-primary font-bold hover:underline"
-                       >
-                         Sacar Tudo
-                       </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 p-3 rounded-xl flex gap-3 items-start">
-                    <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0" />
-                    <p className="text-xs text-yellow-200/70">
-                      Taxa de saque: <strong>R$ {balance.withdrawFee.toFixed(2)}</strong>
-                    </p>
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={withdrawLoading || !withdrawAmount}
-                    className="w-full py-4 bg-primary hover:bg-orange-600 rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {withdrawLoading ? <Loader2 className="animate-spin" /> : 'Confirmar Saque'}
-                  </button>
-                </form>
-              </motion.div>
-            </div>
-      )}
-      </AnimatePresence>
-    </>
-  );
-}
-
-
-// --- ABA 2: EXTRATO (Com dados do Asaas em tempo real) ---
-function ExtractTab() {
-  const { user } = useAuth();
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<'asaas' | 'local'>('asaas');
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  const fetchAsaasStatement = async (offset = 0) => {
-    try {
-      const fn = httpsCallable(functions, 'financeGetStatement');
-      const res: any = await fn({ limit: 20, offset });
-      
-      if (offset === 0) {
-        setTransactions(res.data.data);
-      } else {
-        setTransactions(prev => [...prev, ...res.data.data]);
-      }
-      setHasMore(res.data.hasMore);
-      setSource('asaas');
-    } catch (e) {
-      console.log('[EXTRATO] Fallback para Firestore local');
-      // Fallback: Dados locais do Firestore
-      await fetchLocalTransactions();
-    } finally {
-      setLoading(false);
-      setLoadingMore(false);
-    }
-  };
-
-  const fetchLocalTransactions = async () => {
-    if (!user) return;
-    const q = query(collection(db, 'users', user.uid, 'transactions'), orderBy('date', 'desc'), limit(20));
-    const snap = await getDocs(q);
-    setTransactions(snap.docs.map(d => ({
-      ...d.data(),
-      id: d.id,
-      value: d.data().amount,
-      type: d.data().type === 'withdraw' ? 'DEBIT' : 'CREDIT',
-      date: d.data().date?.toDate ? new Date(d.data().date.toDate()).toISOString().split('T')[0] : 'Hoje',
-      description: d.data().type === 'withdraw' ? 'Saque Pix' : 'Venda Recebida'
-    })));
-    setSource('local');
-  };
-
-  useEffect(() => {
-    fetchAsaasStatement();
-  }, [user]);
-
-  const loadMore = () => {
-    setLoadingMore(true);
-    fetchAsaasStatement(transactions.length);
-  };
-
-  if (loading) return <div className="p-10 text-center"><Loader2 className="animate-spin mx-auto text-primary"/></div>;
-
-  return (
-    <div className="bg-[#121212] border border-white/10 rounded-3xl overflow-hidden">
-       <div className="p-6 border-b border-white/10 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-lg">Extrato Financeiro</h3>
-            <p className="text-xs text-white/40">
-              {source === 'asaas' ? '✓ Dados em tempo real do Asaas' : '⚠ Dados locais (cache)'}
-            </p>
-          </div>
-          <button 
-            onClick={() => { setLoading(true); fetchAsaasStatement(); }}
-            className="p-2 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
-          >
-            <History className="w-4 h-4 text-white/60" />
-          </button>
-       </div>
-       
-       <div className="divide-y divide-white/10">
-          {transactions.length === 0 ? (
-             <div className="p-10 text-center text-white/30">
-               <DollarSign className="w-12 h-12 mx-auto mb-4 opacity-20"/>
-               <p>Nenhuma transação encontrada.</p>
-               <p className="text-xs mt-2">Suas movimentações aparecerão aqui.</p>
-             </div>
-          ) : transactions.map((tx, i) => (
-             <div key={tx.id || i} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
-                <div className="flex items-center gap-4">
-                   <div className={`p-3 rounded-full ${tx.type === 'DEBIT' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
-                      {tx.type === 'DEBIT' ? <ArrowUpRight className="w-4 h-4"/> : <ArrowDownLeft className="w-4 h-4"/>}
-                   </div>
-                   <div>
-                      <p className="font-bold text-sm">{tx.description || (tx.type === 'DEBIT' ? 'Saque/Transferência' : 'Recebimento')}</p>
-                      <p className="text-xs text-white/40">{tx.date}</p>
-                   </div>
-                </div>
-                <div className="text-right">
-                  <span className={`font-mono font-bold ${tx.type === 'DEBIT' ? 'text-white' : 'text-green-400'}`}>
-                     {tx.type === 'DEBIT' ? '-' : '+'}{formatCurrency(Math.abs(tx.value))}
-                  </span>
-                  {tx.balance !== undefined && (
-                    <p className="text-xs text-white/30 mt-1">Saldo: {formatCurrency(tx.balance)}</p>
-                  )}
-                </div>
-             </div>
-          ))}
-       </div>
-
-       {/* Botão Carregar Mais */}
-       {hasMore && (
-         <div className="p-4 border-t border-white/10">
-           <button 
-             onClick={loadMore}
-             disabled={loadingMore}
-             className="w-full py-3 bg-white/5 hover:bg-white/10 rounded-xl font-bold text-sm transition-colors flex items-center justify-center gap-2"
-           >
-             {loadingMore ? <Loader2 className="animate-spin w-4 h-4"/> : 'Carregar Mais'}
-           </button>
-         </div>
-       )}
-    </div>
-  );
-}
-
-
-// --- ABA 3: CONFIGURAÇÕES E DESVINCULAR ---
-function SettingsTab({ financeData }: any) {
-  const [unlinking, setUnlinking] = useState(false);
-
-  const handleUnlink = async () => {
-    const confirm = window.confirm("TEM CERTEZA? Isso vai desconectar sua conta atual.");
-    if (!confirm) return;
-
-    setUnlinking(true);
-    try {
-      const fn = httpsCallable(functions, 'financeUnlinkAccount');
-      await fn();
-      toast.success("Conta desvinculada.");
-      window.location.reload(); 
-    } catch (error: any) {
-      toast.error("Erro ao desvincular.");
-    } finally {
-      setUnlinking(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-       {/* Card de Dados */}
-       <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
-          <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
-             <Building2 className="w-5 h-5 text-primary"/> Dados da Conta
-          </h3>
-          <div className="grid md:grid-cols-2 gap-6 text-sm">
-             <div>
-                <p className="text-white/40 mb-1">ID da Conta Asaas</p>
-                <code className="bg-black px-3 py-2 rounded border border-white/10 font-mono text-green-400 block w-full">
-                   {financeData.asaasAccountId}
-                </code>
-             </div>
-             <div>
-                <p className="text-white/40 mb-1">Chave da Carteira (Wallet ID)</p>
-                <code className="bg-black px-3 py-2 rounded border border-white/10 font-mono text-white/60 block w-full">
-                   {financeData.asaasWalletId}
-                </code>
-             </div>
-             <div>
-                <p className="text-white/40 mb-1">Status</p>
-                <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 text-green-500 font-bold text-xs uppercase">
-                   <CheckCircle2 className="w-3 h-3"/> {financeData.status}
-                </span>
-             </div>
-          </div>
-       </div>
-
-       {/* Área de Perigo */}
-       <div className="bg-red-500/5 border border-red-500/20 rounded-3xl p-8">
-          <div className="flex items-start gap-4">
-             <div className="p-3 bg-red-500/10 rounded-xl text-red-500">
-                <AlertTriangle className="w-6 h-6"/>
-             </div>
-             <div>
-                <h3 className="text-lg font-bold text-red-500 mb-2">Zona de Perigo</h3>
-                <p className="text-white/60 text-sm mb-6 max-w-xl">
-                   Desvincular sua conta remove o acesso a ela através deste painel. 
-                   Seu histórico fiscal permanece no Asaas.
-                </p>
+              <div className="flex gap-3">
                 <button 
-                   onClick={handleUnlink}
-                   disabled={unlinking}
-                   className="px-6 py-3 bg-red-500/10 hover:bg-red-500 hover:text-white border border-red-500/30 rounded-xl text-red-500 font-bold text-sm uppercase tracking-wider transition-all flex items-center gap-2"
+                  onClick={() => setWithdrawModalOpen(false)}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-colors"
                 >
-                   {unlinking ? <Loader2 className="animate-spin"/> : <LogOut className="w-4 h-4"/>}
-                   Desvincular Conta Atual
+                  Cancelar
                 </button>
-             </div>
-          </div>
-       </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// COMPONENTES AUXILIARES (ONBOARDING & DOCS)
-// ============================================================================
-
-function OnboardingSection({ user }: any) {
-  const [mode, setMode] = useState<'create' | 'link'>('create');
-  
-  // States para Link
-  const [apiKey, setApiKey] = useState('');
-  const [linking, setLinking] = useState(false);
-
-  // States para Create
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState<OnboardFormData>({
-    name: '', email: user?.email || '', cpfCnpj: '', birthDate: '', 
-    companyType: 'MEI', incomeValue: '', phone: '', postalCode: '', 
-    address: '', addressNumber: '', province: '', city: '', state: ''
-  });
-
-  const handleLinkAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Validação melhorada
-    if (apiKey.length < 20 || !apiKey.includes('$')) {
-      toast.error('Formato de chave inválido. Certifique-se de copiar a chave completa do Asaas.');
-      return;
-    }
-
-    setLinking(true);
-    try {
-      const linkFn = httpsCallable(functions, 'financeLinkExistingAccount');
-      await linkFn({ apiKey: apiKey.trim() });
-      
-      toast.success('Conta conectada com sucesso!');
-      // Pequeno delay para o usuário ler o toast antes de recarregar
-      setTimeout(() => window.location.reload(), 1500);
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao conectar conta');
-    } finally {
-      setLinking(false);
-    }
-  };
-
-  const handleInputChange = (field: keyof OnboardFormData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleCreateAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
-    
-    if (!formData.addressNumber || formData.birthDate.length < 10 || !formData.incomeValue) {
-      toast.error('Preencha os campos obrigatórios corretamente.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    try {
-      const [day, month, year] = formData.birthDate.split('/');
-      const formattedDate = `${year}-${month}-${day}`;
-      const rawIncome = formData.incomeValue.replace(/[^0-9,]/g, '').replace(',', '.');
-      const incomeNumber = parseFloat(rawIncome);
-
-      const onboardFn = httpsCallable(functions, 'financeOnboard');
-      await onboardFn({ ...formData, birthDate: formattedDate, incomeValue: incomeNumber });
-      
-      toast.success('Conta criada! Agora envie os documentos.');
-    } catch (error: any) {
-      toast.error(error.message || 'Erro ao criar conta');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="bg-[#121212] border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
-       {/* ABAS DE NAVEGAÇÃO */}
-       <div className="grid grid-cols-2 border-b border-white/10">
-          <button 
-            type="button"
-            onClick={() => setMode('create')}
-            className={`p-6 text-sm font-bold uppercase tracking-widest transition-all ${
-               mode === 'create' 
-               ? 'bg-primary/10 text-primary border-b-2 border-primary' 
-               : 'text-white/40 hover:bg-white/5'
-            }`}
-          >
-            Não tenho conta
-          </button>
-          <button 
-            type="button"
-            onClick={() => setMode('link')}
-            className={`p-6 text-sm font-bold uppercase tracking-widest transition-all ${
-               mode === 'link' 
-               ? 'bg-blue-500/10 text-blue-500 border-b-2 border-blue-500' 
-               : 'text-white/40 hover:bg-white/5'
-            }`}
-          >
-            Já tenho conta Asaas
-          </button>
-       </div>
-
-       <div className="p-8 md:p-10 min-h-[400px]">
-          
-          {/* MODO 1: CRIAR NOVA */}
-          {mode === 'create' && (
-             <div className="animate-in fade-in slide-in-from-left-4">
-                <div className="mb-8 text-center">
-                   <h2 className="text-2xl font-black italic mb-2 text-white">Criar Conta Digital</h2>
-                   <p className="text-white/40">Abra sua conta gratuita para receber pagamentos hoje mesmo.</p>
-                </div>
-                
-                <form onSubmit={handleCreateAccount} className="max-w-3xl mx-auto space-y-6">
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Tipo de Conta</label>
-                      <select value={formData.companyType} onChange={(e) => handleInputChange('companyType', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none">
-                        {COMPANY_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Nome / Razão Social</label>
-                      <input required value={formData.name} onChange={(e) => handleInputChange('name', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="João da Silva" />
-                    </div>
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">CPF ou CNPJ</label>
-                      <IMaskInput mask={formData.companyType === 'INDIVIDUAL' ? '000.000.000-00' : [{ mask: '000.000.000-00' }, { mask: '00.000.000/0000-00' }] as any} value={formData.cpfCnpj} onAccept={(v: any) => handleInputChange('cpfCnpj', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Data de Nascimento</label>
-                      <div className="relative">
-                         <IMaskInput mask="00/00/0000" value={formData.birthDate} onAccept={(v: any) => handleInputChange('birthDate', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="DD/MM/AAAA" />
-                         <Calendar className="absolute right-4 top-3 text-white/20 w-4 h-4 pointer-events-none"/>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid md:grid-cols-2 gap-6">
-                     <div>
-                       <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Faturamento Mensal</label>
-                       <IMaskInput mask="R$ num" blocks={{ num: { mask: Number, thousandsSeparator: '.', padFractionalZeros: true, radix: ',', mapToRadix: ['.'] } } as any} value={formData.incomeValue} onAccept={(v: any) => handleInputChange('incomeValue', v)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" placeholder="R$ 0,00" />
-                     </div>
-                     <div>
-                       <label className="text-xs font-bold text-white/60 mb-2 block uppercase">Email</label>
-                       <input type="email" required value={formData.email} onChange={(e) => handleInputChange('email', e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white" />
-                     </div>
-                  </div>
-                  <div className="grid md:grid-cols-3 gap-4">
-                     <input placeholder="CEP" value={formData.postalCode} onChange={(e) => handleInputChange('postalCode', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-                     <input placeholder="Endereço" value={formData.address} onChange={(e) => handleInputChange('address', e.target.value)} className="md:col-span-2 bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-                  </div>
-                  <div className="grid md:grid-cols-4 gap-4">
-                     <input placeholder="Número" value={formData.addressNumber} onChange={(e) => handleInputChange('addressNumber', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-                     <input placeholder="Bairro" value={formData.province} onChange={(e) => handleInputChange('province', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-                     <input placeholder="Cidade" value={formData.city} onChange={(e) => handleInputChange('city', e.target.value)} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-                     <input placeholder="UF" maxLength={2} value={formData.state} onChange={(e) => handleInputChange('state', e.target.value.toUpperCase())} className="bg-black/50 border border-white/10 p-3 rounded-xl text-white" />
-                  </div>
-                  
-                  <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2">
-                    {isSubmitting ? <Loader2 className="animate-spin" /> : 'Criar Conta Financeira'}
-                  </button>
-                </form>
-             </div>
-          )}
-
-          {/* MODO 2: VINCULAR EXISTENTE (Layout Intuitivo com Tutorial) */}
-          {mode === 'link' && (
-             <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-right-4">
-                <div className="text-center mb-10">
-                   <div className="w-20 h-20 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-500/10">
-                      <LinkIcon className="w-10 h-10" />
-                   </div>
-                   <h2 className="text-3xl font-black italic mb-3 text-white">Conectar Asaas</h2>
-                   <p className="text-white/50 text-lg">
-                      Utilize sua conta existente para gerenciar tudo pelo Emprata.
-                   </p>
-                </div>
-
-                <div className="grid md:grid-cols-2 gap-8 mb-8">
-                   {/* Coluna Instruções */}
-                   <div className="bg-white/5 p-6 rounded-2xl border border-white/5">
-                      <h4 className="font-bold text-white mb-4 flex items-center gap-2">
-                         <HelpCircle className="w-4 h-4 text-blue-400"/> Como pegar a chave?
-                      </h4>
-                      <ol className="space-y-4 text-sm text-white/60">
-                         <li className="flex gap-3">
-                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">1</span>
-                            <span>Acesse o painel do Asaas no computador.</span>
-                         </li>
-                         <li className="flex gap-3">
-                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">2</span>
-                            <span>Vá no menu <strong className="text-white">Configurações</strong> e depois em <strong className="text-white">Integrações</strong>.</span>
-                         </li>
-                         <li className="flex gap-3">
-                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">3</span>
-                            <span>Clique em <strong className="text-white">"Gerar nova chave de API"</strong>.</span>
-                         </li>
-                         <li className="flex gap-3">
-                            <span className="flex-none w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-xs font-bold text-white">4</span>
-                            <span>Copie a chave inteira (começa com <code className="text-blue-400">$</code>) e cole ao lado.</span>
-                         </li>
-                      </ol>
-                   </div>
-
-                   {/* Coluna Formulário */}
-                   <form onSubmit={handleLinkAccount} className="flex flex-col justify-center space-y-4">
-                      <div className="space-y-2">
-                         <label className="text-xs font-bold text-blue-400 uppercase tracking-wider flex items-center gap-2">
-                            <Key className="w-4 h-4" /> Cole sua Chave API Aqui
-                         </label>
-                         <textarea 
-                            required
-                            rows={3}
-                            placeholder="$aact_..."
-                            value={apiKey}
-                            onChange={e => setApiKey(e.target.value)}
-                            className="w-full bg-black border border-white/10 rounded-xl p-4 text-white focus:border-blue-500 outline-none font-mono text-xs resize-none"
-                         />
-                      </div>
-
-                      <button
-                        type="submit"
-                        disabled={linking || apiKey.length < 10}
-                        className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-600/20"
-                      >
-                        {linking ? <Loader2 className="animate-spin" /> : (
-                           <>Conectar Agora <ArrowRight className="w-4 h-4" /></>
-                        )}
-                      </button>
-                   </form>
-                </div>
-                
-                <p className="text-center text-xs text-white/20">
-                   Seus dados são criptografados e utilizados apenas para processar pagamentos na plataforma.
-                </p>
-             </div>
-          )}
-       </div>
-    </div>
-  );
-}
-
-function DocumentsSection({ financeData }: any) {
-    const docs = financeData.documents || {};
-    
-    // Função de Upload
-    const handleDocUpload = async (type: string, base64: string, fileName: string) => {
-      try {
-        const uploadFn = httpsCallable(functions, 'financeUploadDocuments');
-        await uploadFn({ type, fileBase64: base64, fileName });
-        toast.success('Documento enviado!');
-      } catch (error: any) {
-        toast.error('Erro no envio.');
-      }
-    };
-
-    return (
-      <div className="bg-[#121212] border border-white/10 rounded-3xl p-10 text-center max-w-3xl mx-auto">
-         <div className="mb-10">
-            <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4 text-primary">
-              <FileText className="w-8 h-8" />
+                <button 
+                  onClick={handleWithdraw}
+                  disabled={withdrawLoading}
+                  className="flex-1 py-3 bg-primary hover:bg-orange-600 text-white rounded-xl font-black uppercase transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {withdrawLoading ? <Loader2 className="animate-spin" /> : 'Confirmar'}
+                </button>
+              </div>
             </div>
-            <h2 className="text-2xl font-bold mb-2">Documentação Pendente</h2>
-            <p className="text-white/50 max-w-md mx-auto">Envie seus documentos para validar a conta.</p>
-         </div>
+          </div>
+        )}
 
-         <div className="grid md:grid-cols-3 gap-6 mb-8">
-            <DocUploadButton label="Frente RG/CNH" type="IDENTIFICATION" onUpload={handleDocUpload} isDone={docs.docIdSent} />
-            <DocUploadButton label="Verso RG/CNH" type="IDENTIFICATION" onUpload={handleDocUpload} isDone={docs.docIdSent} />
-            <DocUploadButton label="Selfie" type="SELFIE" onUpload={handleDocUpload} isDone={docs.docSelfieSent} />
-         </div>
-
-         <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex gap-3 text-left">
-            <AlertTriangle className="w-5 h-5 text-yellow-500 shrink-0" />
-            <p className="text-xs text-yellow-200/80">O Asaas exige fotos legíveis. A validação pode levar até 48h.</p>
-         </div>
       </div>
-    )
-}
-
-const DocUploadButton = ({ label, type, onUpload, isDone }: any) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error('Máximo 5MB'); return; }
-
-    setUploading(true);
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = async () => {
-      await onUpload(type, reader.result as string, file.name);
-      setUploading(false);
-    };
-  };
-
-  return (
-    <div className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center transition-all ${isDone ? 'border-green-500/50 bg-green-500/5' : 'border-white/10 hover:border-primary/50 hover:bg-white/5'}`}>
-      <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleFile} disabled={isDone || uploading} />
-      {isDone ? (
-        <>
-          <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center mb-3"><Check className="w-6 h-6 text-white" /></div>
-          <span className="text-green-500 font-bold text-sm">Enviado</span>
-        </>
-      ) : uploading ? (
-        <Loader2 className="w-8 h-8 text-primary animate-spin mb-2" />
-      ) : (
-        <>
-          <button onClick={() => fileInputRef.current?.click()} className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center mb-3 text-white hover:bg-primary transition-colors">
-            {type === 'SELFIE' ? <Camera className="w-5 h-5"/> : <Upload className="w-5 h-5"/>}
-          </button>
-          <span className="text-white/60 font-medium text-sm">{label}</span>
-        </>
-      )}
     </div>
   );
-};
+}
