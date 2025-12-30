@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   CreditCard, CheckCircle2, AlertTriangle, Loader2, Building2,
-  Calendar, DollarSign, User
+  Calendar
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
@@ -11,13 +11,13 @@ import { functions, db } from '../../config/firebase';
 import { useAuth } from '../../hooks/useAuth';
 import { IMaskInput } from 'react-imask';
 
-// Tipos atualizados
+// Tipos
 interface OnboardFormData {
   name: string;
   email: string;
   cpfCnpj: string;
-  birthDate: string; // Novo
-  companyType: string; // Novo
+  birthDate: string;
+  companyType: string;
   phone: string;
   postalCode: string;
   address: string;
@@ -72,7 +72,6 @@ export default function FinanceSettings() {
     e.preventDefault();
     setIsSubmitting(true);
 
-    // Validação simples de data
     if (formData.birthDate.length < 10) {
       toast.error('Data de nascimento inválida');
       setIsSubmitting(false);
@@ -80,7 +79,6 @@ export default function FinanceSettings() {
     }
 
     try {
-      // Converte DD/MM/YYYY para YYYY-MM-DD
       const [day, month, year] = formData.birthDate.split('/');
       const formattedDate = `${year}-${month}-${day}`;
 
@@ -101,7 +99,6 @@ export default function FinanceSettings() {
 
   if (loading) return <div className="p-10 text-center"><Loader2 className="animate-spin mx-auto"/></div>;
 
-  // Se já tiver conta ativa
   if (financeStatus?.status === 'active') {
     return (
       <div className="p-8 max-w-2xl mx-auto text-center bg-[#111] rounded-3xl border border-white/10 mt-10">
@@ -128,7 +125,6 @@ export default function FinanceSettings() {
 
         <form onSubmit={handleSubmit} className="bg-[#121212] border border-white/10 rounded-3xl p-6 md:p-8 space-y-6">
           
-          {/* TIPO DE CONTA & NOME */}
           <div className="grid md:grid-cols-2 gap-6">
             <div>
               <label className="block text-xs font-bold text-white/60 mb-2 uppercase tracking-wider">Tipo de Conta</label>
@@ -152,14 +148,14 @@ export default function FinanceSettings() {
             </div>
           </div>
 
-          {/* DOCUMENTOS */}
           <div className="grid md:grid-cols-2 gap-6">
             <div>
               <label className="block text-xs font-bold text-white/60 mb-2 uppercase tracking-wider">CPF ou CNPJ</label>
               <IMaskInput
-                mask={formData.companyType === 'INDIVIDUAL' ? '000.000.000-00' : [{ mask: '000.000.000-00' }, { mask: '00.000.000/0000-00' }]}
+                // CORREÇÃO AQUI: Cast 'as any' para resolver conflito de tipo
+                mask={formData.companyType === 'INDIVIDUAL' ? '000.000.000-00' : [{ mask: '000.000.000-00' }, { mask: '00.000.000/0000-00' }] as any}
                 value={formData.cpfCnpj}
-                onAccept={(val) => handleInputChange('cpfCnpj', val)}
+                onAccept={(val: any) => handleInputChange('cpfCnpj', val)}
                 className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
                 placeholder="Digite apenas números"
               />
@@ -170,7 +166,7 @@ export default function FinanceSettings() {
                 <IMaskInput
                   mask="00/00/0000"
                   value={formData.birthDate}
-                  onAccept={(val) => handleInputChange('birthDate', val)}
+                  onAccept={(val: any) => handleInputChange('birthDate', val)}
                   className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
                   placeholder="DD/MM/AAAA"
                 />
@@ -180,7 +176,6 @@ export default function FinanceSettings() {
             </div>
           </div>
 
-          {/* CONTATO */}
           <div className="grid md:grid-cols-2 gap-6">
             <div>
               <label className="block text-xs font-bold text-white/60 mb-2 uppercase tracking-wider">Email da Conta</label>
@@ -197,20 +192,19 @@ export default function FinanceSettings() {
               <IMaskInput
                 mask="(00) 00000-0000"
                 value={formData.phone}
-                onAccept={(val) => handleInputChange('phone', val)}
+                onAccept={(val: any) => handleInputChange('phone', val)}
                 className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
               />
             </div>
           </div>
 
-          {/* ENDEREÇO (Simplificado para o exemplo, mas ideal manter completo) */}
           <div className="grid md:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-bold text-white/60 mb-2 uppercase tracking-wider">CEP</label>
               <IMaskInput
                 mask="00000-000"
                 value={formData.postalCode}
-                onAccept={(val) => handleInputChange('postalCode', val)}
+                onAccept={(val: any) => handleInputChange('postalCode', val)}
                 className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
               />
             </div>
