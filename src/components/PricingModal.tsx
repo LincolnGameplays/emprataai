@@ -1,327 +1,172 @@
-/**
- * ⚡ PRICING MODAL - Asaas Subscription with Pending Plan Flow ⚡
- * Handles both logged-in and anonymous users
- */
-
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Zap, CheckCircle2, Star, Sparkles, Crown, Loader2 } from 'lucide-react';
-import { useAppStore } from '../store/useAppStore';
-import { Link, useNavigate } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../config/firebase';
-import { toast } from 'sonner';
+import { useAppStore } from '../store/useAppStore'; // ou seu hook useAuth
+import { useNavigate, Link } from 'react-router-dom';
+import CheckoutModal from './CheckoutModal'; // ✅ Importamos o modal novo
 
 interface PricingModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-// ══════════════════════════════════════════════════════════════════
-// PRICING VALUES - Single source of truth
-// ══════════════════════════════════════════════════════════════════
-const PRICING = {
-  starter: { value: 97.00, content_name: 'Pack Delivery', asaasPlan: 'STARTER' },
-  pro: { value: 197.00, content_name: 'Franquia / Pro', asaasPlan: 'GROWTH' }
-} as const;
-
 export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
-  const user = useAppStore((state) => state.userId);
+  const user = useAppStore((state) => state.userId); // Verifica se tem user logado
   const navigate = useNavigate();
-  const [loading, setLoading] = useState<'starter' | 'pro' | null>(null);
   
-  /**
-   * Handle checkout process
-   * - Unauthenticated: Save plan to session, redirect to login
-   * - Authenticated: Call Asaas createSubscription, redirect to payment
-   */
-  const handleCheckout = async (planType: 'starter' | 'pro') => {
-    const plan = PRICING[planType];
-    
-    // Save intent for analytics
-    sessionStorage.setItem('purchase_intent_value', plan.value.toString());
+  // Estado para controlar qual plano está sendo comprado
+  const [checkoutConfig, setCheckoutConfig] = useState<{
+    plan: 'STARTER' | 'GROWTH';
+    price: number;
+  } | null>(null);
 
-    // ════════════════════════════════════════════════════════════════
-    // FLOW 1: NOT LOGGED IN → Save plan & redirect to auth
-    // ════════════════════════════════════════════════════════════════
+  const handleSelectPlan = (plan: 'STARTER' | 'GROWTH') => {
+    // 1. Se não estiver logado, manda pro login
     if (!user) {
-      sessionStorage.setItem('pending_plan', planType);
-      onClose();
+      sessionStorage.setItem('pending_plan', plan); // Salva intenção
       navigate('/auth');
+      onClose();
       return;
     }
 
-    // ════════════════════════════════════════════════════════════════
-    // FLOW 2: LOGGED IN → Create Asaas subscription
-    // ════════════════════════════════════════════════════════════════
-    setLoading(planType);
-
-    try {
-      // Meta Pixel tracking
-      if (typeof window.fbq === 'function') {
-        window.fbq('track', 'InitiateCheckout', {
-          value: plan.value,
-          currency: 'BRL',
-          content_name: plan.content_name
-        });
-      }
-
-      // GA4 tracking
-      if (typeof window.gtag === 'function') {
-        window.gtag('event', 'begin_checkout', {
-          value: plan.value,
-          currency: 'BRL',
-          items: [{ item_name: plan.content_name, price: plan.value, quantity: 1 }]
-        });
-      }
-
-      // Call Asaas subscription function
-      const createSub = httpsCallable(functions, 'createSubscription');
-      
-      const result = await createSub({
-        plan: plan.asaasPlan,
-        billingType: 'PIX'
-      });
-
-      const data = result.data as { success: boolean; invoiceUrl?: string };
-
-      if (data.success && data.invoiceUrl) {
-        toast.success('Redirecionando para pagamento...');
-        window.location.href = data.invoiceUrl;
-      } else {
-        throw new Error('Falha ao gerar pagamento');
-      }
-
-    } catch (error: any) {
-      console.error('Checkout error:', error);
-      toast.error(error.message || 'Erro ao processar assinatura');
-    } finally {
-      setLoading(null);
-    }
+    // 2. Se estiver logado, ABRE O MODAL DE CHECKOUT (Não redireciona!)
+    setCheckoutConfig({
+      plan,
+      price: plan === 'STARTER' ? 97.00 : 197.00
+    });
   };
   
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6">
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="absolute inset-0 bg-black/90 backdrop-blur-md"
-          />
-          
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0, y: 20 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.9, opacity: 0, y: 20 }}
-            className="relative w-full max-w-6xl bg-[#0a0a0a] border border-white/10 rounded-[3rem] overflow-hidden shadow-[0_0_100px_rgba(255,94,0,0.3)] max-h-[90vh] overflow-y-auto"
-          >
-            {/* Header Gradient */}
-            <div className="absolute top-0 inset-x-0 h-60 bg-gradient-to-b from-primary/20 via-primary/5 to-transparent pointer-events-none" />
-            
-            <button 
+    <>
+      <AnimatePresence>
+        {isOpen && (
+          <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 md:p-6">
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={onClose}
-              className="absolute top-6 right-6 p-3 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors z-10"
+              className="absolute inset-0 bg-black/90 backdrop-blur-md"
+            />
+            
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative w-full max-w-6xl bg-[#0a0a0a] border border-white/10 rounded-[3rem] overflow-hidden shadow-[0_0_100px_rgba(255,94,0,0.3)] max-h-[90vh] overflow-y-auto"
             >
-              <X className="w-6 h-6" />
-            </button>
+              <button 
+                onClick={onClose}
+                className="absolute top-6 right-6 p-3 hover:bg-white/5 rounded-full text-white/40 hover:text-white transition-colors z-10"
+              >
+                <X className="w-6 h-6" />
+              </button>
 
-            <div className="p-8 md:p-12 pt-20 relative z-10">
-              {/* Header */}
-              <div className="text-center mb-12">
-                <div className="w-20 h-20 bg-primary rounded-3xl flex items-center justify-center mb-6 shadow-2xl shadow-primary/40 rotate-12 mx-auto">
-                  <Zap className="w-10 h-10 text-white fill-current" />
+              <div className="p-8 md:p-12 pt-20 relative z-10">
+                <div className="text-center mb-12">
+                  <div className="w-20 h-20 bg-primary rounded-3xl flex items-center justify-center mb-6 shadow-2xl shadow-primary/40 rotate-12 mx-auto">
+                    <Zap className="w-10 h-10 text-white fill-current" />
+                  </div>
+                  <h2 className="text-4xl md:text-6xl font-black italic tracking-tighter uppercase mb-4">
+                    Escolha Seu <span className="text-primary">Arsenal</span>
+                  </h2>
+                  <p className="text-white/50 font-medium text-lg max-w-2xl mx-auto">
+                    Domine o delivery com inteligência artificial.
+                  </p>
                 </div>
-                
-                <h2 className="text-4xl md:text-6xl font-black italic tracking-tighter uppercase mb-4">
-                  Escolha Seu <span className="text-primary">Arsenal</span>
-                </h2>
-                
-                <p className="text-white/50 font-medium text-lg max-w-2xl mx-auto">
-                  De teste gratuito a domínio total do delivery. Você escolhe o ritmo.
+
+                <div className="grid md:grid-cols-3 gap-6 mb-8">
+                  
+                  {/* FREE */}
+                  <div className="bg-white/5 border border-white/10 rounded-3xl p-8 flex flex-col">
+                    <div className="mb-6">
+                      <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white/30">Teste Grátis</span>
+                      <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Degustação</h3>
+                    </div>
+                    <div className="mb-6">
+                      <div className="text-5xl font-black tracking-tight mb-1 italic">R$ 0</div>
+                      <p className="text-xs font-bold text-white/40">Sem cartão • Sem compromisso</p>
+                    </div>
+                    <ul className="space-y-2 mb-8 flex-grow text-sm font-medium text-white/50">
+                      <li className="flex gap-2 items-start"><CheckCircle2 className="w-4 h-4 text-white/20"/> 1 Crédito</li>
+                      <li className="flex gap-2 items-start"><CheckCircle2 className="w-4 h-4 text-white/20"/> Baixa Resolução</li>
+                    </ul>
+                    <Link to="/app" onClick={onClose} className="mt-auto">
+                      <button className="w-full py-4 rounded-2xl border-2 border-white/10 font-black hover:bg-white/5 transition-all uppercase tracking-widest text-xs">
+                        Testar Agora
+                      </button>
+                    </Link>
+                  </div>
+
+                  {/* STARTER */}
+                  <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-2 border-blue-500/30 rounded-3xl p-8 flex flex-col relative">
+                    <div className="mb-6 mt-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Assinatura Mensal</span>
+                      <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Pack Delivery</h3>
+                    </div>
+                    <div className="mb-6">
+                      <div className="flex items-baseline gap-2 mb-1">
+                        <span className="text-5xl font-black tracking-tight italic">R$ 97</span>
+                        <span className="text-lg font-bold text-white/40">/mês</span>
+                      </div>
+                      <p className="text-sm font-bold text-blue-400">50 Créditos Mensais</p>
+                    </div>
+                    <ul className="space-y-2 mb-8 flex-grow text-sm font-medium">
+                      <li className="flex gap-2 items-start"><Sparkles className="w-4 h-4 text-blue-400"/> 50 Créditos</li>
+                      <li className="flex gap-2 items-start"><Sparkles className="w-4 h-4 text-blue-400"/> Full HD</li>
+                    </ul>
+                    <button 
+                      onClick={() => handleSelectPlan('STARTER')}
+                      className="w-full py-5 rounded-2xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto flex items-center justify-center gap-2"
+                    >
+                      Comprar Pack
+                    </button>
+                  </div>
+
+                  {/* PRO */}
+                  <div className="bg-gradient-to-br from-primary/20 to-orange-600/10 border-2 border-primary rounded-3xl p-8 flex flex-col relative overflow-hidden transform scale-105">
+                    <div className="mb-6 mt-6 relative z-10">
+                      <span className="text-[10px] font-black uppercase tracking-[0.4em] text-primary">Emprata Neural Engine™</span>
+                      <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Franquia / Pro</h3>
+                    </div>
+                    <div className="mb-6 relative z-10">
+                      <div className="flex items-baseline gap-2 mb-1">
+                        <span className="text-5xl font-black tracking-tight italic">R$ 197</span>
+                        <span className="text-lg font-bold text-white/40">/mês</span>
+                      </div>
+                      <p className="text-sm font-bold text-primary">200 Créditos + Vibes PRO</p>
+                    </div>
+                    <ul className="space-y-2 mb-8 flex-grow text-sm font-medium relative z-10">
+                      <li className="flex gap-2 items-start"><Crown className="w-4 h-4 text-primary"/> 200 Créditos</li>
+                      <li className="flex gap-2 items-start"><Crown className="w-4 h-4 text-primary"/> 4K Ultra HD</li>
+                      <li className="flex gap-2 items-start"><Crown className="w-4 h-4 text-primary"/> Sem Marca d'água</li>
+                    </ul>
+                    <button 
+                      onClick={() => handleSelectPlan('GROWTH')}
+                      className="w-full py-5 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto relative z-10 flex items-center justify-center gap-2"
+                    >
+                      <Star className="w-5 h-5 inline-block mr-2 fill-current" />
+                      Quero Lucro Máximo
+                    </button>
+                  </div>
+
+                </div>
+                <p className="text-center text-xs font-black uppercase tracking-widest text-white/20 mt-8">
+                  Pagamento 100% Seguro • Processado pela Asaas
                 </p>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-              {/* 3-Tier Grid */}
-              <div className="grid md:grid-cols-3 gap-6 mb-8">
-                
-                {/* TIER 1: FREE */}
-                <div className="bg-white/5 border border-white/10 rounded-3xl p-8 flex flex-col">
-                  <div className="mb-6">
-                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-white/30">Teste Grátis</span>
-                    <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Degustação</h3>
-                  </div>
-                  
-                  <div className="mb-6">
-                    <div className="text-5xl font-black tracking-tight mb-1 italic">R$ 0</div>
-                    <p className="text-xs font-bold text-white/40">Sem cartão • Sem compromisso</p>
-                  </div>
-                  
-                  <ul className="space-y-2 mb-8 flex-grow text-sm font-medium text-white/50">
-                    <li className="flex gap-2 items-start">
-                      <CheckCircle2 className="w-4 h-4 text-white/20 shrink-0 mt-0.5" />
-                      <span><span className="text-white font-bold">1 Crédito</span> para testar</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <CheckCircle2 className="w-4 h-4 text-white/20 shrink-0 mt-0.5" />
-                      Baixa Resolução (720p)
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <CheckCircle2 className="w-4 h-4 text-white/20 shrink-0 mt-0.5" />
-                      Com Marca d'água
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <CheckCircle2 className="w-4 h-4 text-white/20 shrink-0 mt-0.5" />
-                      1 Estilo disponível
-                    </li>
-                  </ul>
-                  
-                  <Link to="/app" onClick={onClose} className="mt-auto">
-                    <button className="w-full py-4 rounded-2xl border-2 border-white/10 font-black hover:bg-white/5 transition-all uppercase tracking-widest text-xs">
-                      Testar Agora
-                    </button>
-                  </Link>
-                </div>
-
-                {/* TIER 2: STARTER */}
-                <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-2 border-blue-500/30 rounded-3xl p-8 flex flex-col relative">
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-500 text-white px-4 py-1 rounded-full font-black text-[10px] tracking-widest uppercase">
-                    🔥 Faça o Cardápio Inteiro
-                  </div>
-                  
-                  <div className="mb-6 mt-2">
-                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-blue-400">Assinatura Mensal</span>
-                    <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Pack Delivery</h3>
-                  </div>
-                  
-                  <div className="mb-6">
-                    <div className="flex items-baseline gap-2 mb-1">
-                      <span className="text-5xl font-black tracking-tight italic">R$ 97</span>
-                      <span className="text-lg font-bold text-white/40">/mês</span>
-                    </div>
-                    <p className="text-sm font-bold text-blue-400">50 Créditos Mensais</p>
-                    <p className="text-xs font-black text-white/30 mt-1">(Acumulativos) • R$ 1,94/foto 🔥</p>
-                  </div>
-                  
-                  <ul className="space-y-2 mb-8 flex-grow text-sm font-medium">
-                    <li className="flex gap-2 items-start">
-                      <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
-                      <span className="text-white font-bold">50 Créditos/mês</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
-                      Full HD (1080p)
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
-                      Sem Marca d'água
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
-                      Todos os Estilos Pro
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Sparkles className="w-4 h-4 text-blue-400 fill-current shrink-0 mt-0.5" />
-                      Suporte via Email
-                    </li>
-                  </ul>
-                  
-                  <button 
-                    onClick={() => handleCheckout('starter')}
-                    disabled={loading !== null}
-                    className="w-full py-5 rounded-2xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {loading === 'starter' ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      'Comprar Pack'
-                    )}
-                  </button>
-                </div>
-
-                {/* TIER 3: PRO */}
-                <div className="bg-gradient-to-br from-primary/20 to-orange-600/10 border-2 border-primary rounded-3xl p-8 flex flex-col relative overflow-hidden transform scale-105">
-                  <div className="absolute top-0 right-0 bg-primary text-white px-6 py-2 rounded-bl-3xl font-black text-[10px] tracking-widest uppercase italic">
-                    MAIS VENDIDO 🚀
-                  </div>
-                  
-                  <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />
-                  
-                  <div className="mb-6 mt-6 relative z-10">
-                    <span className="text-[10px] font-black uppercase tracking-[0.4em] text-primary">Emprata Neural Engine™</span>
-                    <h3 className="text-2xl font-black mt-2 mb-1 italic uppercase">Franquia / Pro</h3>
-                  </div>
-                  
-                  <div className="mb-6 relative z-10">
-                    <div className="flex items-baseline gap-2 mb-1">
-                      <span className="text-5xl font-black tracking-tight italic">R$ 197</span>
-                      <span className="text-lg font-bold text-white/40">/mês</span>
-                    </div>
-                    <p className="text-sm font-bold text-primary">200 Créditos Mensais + Vibes PRO</p>
-                    <p className="text-xs font-black text-white/30 mt-1">Menos de R$ 1,00/foto (R$ 0,98) 🚀</p>
-                  </div>
-                  
-                  <div className="bg-primary/10 border border-primary/20 rounded-xl p-3 mb-6 relative z-10">
-                    <p className="text-xs font-black text-primary uppercase tracking-wide text-center">
-                      💡 Ideal para Dark Kitchens e Franquias
-                    </p>
-                  </div>
-                  
-                  <ul className="space-y-2 mb-8 flex-grow text-sm font-medium relative z-10">
-                    <li className="flex gap-2 items-start">
-                      <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      <span className="text-white font-bold">200 Créditos Premium/mês</span>
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      4K Ultra HD
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      Sem Marca d'água
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      Estilos Exclusivos
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      Suporte WhatsApp
-                    </li>
-                    <li className="flex gap-2 items-start">
-                      <Crown className="w-4 h-4 text-primary fill-current shrink-0 mt-0.5" />
-                      Processamento Rápido
-                    </li>
-                  </ul>
-                  
-                  <button 
-                    onClick={() => handleCheckout('pro')}
-                    disabled={loading !== null}
-                    className="w-full py-5 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto relative z-10 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {loading === 'pro' ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <>
-                        <Star className="w-5 h-5 fill-current" />
-                        Quero Lucro Máximo
-                      </>
-                    )}
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Footer Note */}
-              <p className="text-center text-xs font-black uppercase tracking-widest text-white/20 mt-8">
-                Pagamento 100% Seguro • Processado pela Asaas
-              </p>
-            </div>
-          </motion.div>
-        </div>
+      {/* ✅ AQUI ESTÁ A MÁGICA: Renderiza o CheckoutModal SE houver plano selecionado */}
+      {checkoutConfig && (
+        <CheckoutModal
+          isOpen={!!checkoutConfig}
+          onClose={() => setCheckoutConfig(null)}
+          plan={checkoutConfig.plan}
+          price={checkoutConfig.price}
+        />
       )}
-    </AnimatePresence>
+    </>
   );
 }

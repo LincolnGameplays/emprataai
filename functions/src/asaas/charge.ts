@@ -1,223 +1,186 @@
-/**
- * ⚡ ASAAS CHARGE - Pix/Card Payment with Split ⚡
- * Generates payment with automatic fee split between Emprata and Restaurant
- * 
- * POST /api/finance/charge
- */
-
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import axios from 'axios';
-import { ASAAS_CONFIG, calculateEmprataFee, UserPlan } from './constants';
+import { ASAAS_CONFIG, calculateEmprataFee } from './constants';
 
-// Initialize if not already
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
-
-// ══════════════════════════════════════════════════════════════════
-// TYPES
-// ══════════════════════════════════════════════════════════════════
 
 interface ChargeRequest {
   orderId: string;
   amount: number;
-  billingType: 'PIX' | 'CREDIT_CARD' | 'BOLETO';
+  billingType: 'PIX' | 'CREDIT_CARD';
   customerData: {
     name: string;
     cpfCnpj: string;
     email?: string;
     phone?: string;
   };
-  restaurantId: string; // UID of restaurant owner
-  description?: string;
-  dueDate?: string; // YYYY-MM-DD, default: today
-  creditCard?: any;
-  creditCardHolder?: any;
+  restaurantId: string; // ID do dono do prato (para Split)
+  creditCard?: {
+    holderName: string;
+    number: string;
+    expiryMonth: string;
+    expiryYear: string;
+    ccv: string;
+  };
+  creditCardHolder?: {
+    name: string;
+    email: string;
+    cpfCnpj: string;
+    postalCode: string;
+    addressNumber: string;
+    phone: string;
+  };
 }
 
-interface SplitRule {
-  walletId: string;
-  fixedValue?: number;
-  percentualValue?: number;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// MAIN FUNCTION
-// ══════════════════════════════════════════════════════════════════
-
-// CORRIGIDO: Assinatura (request)
 export const financeCharge = functions.https.onCall(async (request) => {
-  const data = request.data as ChargeRequest; // Casting explícito
-  
-  // Validate input
+  const data = request.data as ChargeRequest;
+  const auth = request.auth;
+
+  // 1. Validação de Auth
+  if (!auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Login necessário para checkout.');
+  }
+
+  // 2. Validação de Campos
   if (!data.orderId || !data.amount || !data.restaurantId) {
-    throw new functions.https.HttpsError(
-      'invalid-argument', 
-      'orderId, amount and restaurantId are required'
-    );
+    throw new functions.https.HttpsError('invalid-argument', 'Dados do pedido incompletos (ID, Valor ou Restaurante faltando).');
   }
-
-  if (data.amount < 5) {
-    throw new functions.https.HttpsError(
-      'invalid-argument',
-      'Valor mínimo para cobrança é R$ 5,00'
-    );
-  }
-
-  // AI FRAUD GUARD (Simulado)
-  let fraudScore = 0;
-  if (data.amount > 500) fraudScore += 30;
-  if (!data.customerData.cpfCnpj) fraudScore += 50;
 
   try {
-    // Get restaurant data
+    // 3. Busca dados do Restaurante para o Split
     const restaurantDoc = await db.collection('users').doc(data.restaurantId).get();
     
     if (!restaurantDoc.exists) {
-      throw new functions.https.HttpsError('not-found', 'Restaurante não encontrado');
+      throw new functions.https.HttpsError('not-found', 'Restaurante não encontrado.');
     }
 
-    const restaurantData = restaurantDoc.data()!;
-    const walletId = restaurantData.finance?.asaasWalletId;
-    const plan: UserPlan = restaurantData.plan || 'free';
+    const restaurantData = restaurantDoc.data();
+    const walletId = restaurantData?.finance?.asaasWalletId;
 
     if (!walletId) {
-      throw new functions.https.HttpsError(
-        'failed-precondition',
-        'Restaurante não possui conta de pagamento ativa'
-      );
+      throw new functions.https.HttpsError('failed-precondition', 'Este restaurante ainda não ativou a conta financeira.');
     }
 
-    // Calculate fees
+    // 4. Calcula Taxas
+    // Se o restaurante não tiver plano definido, assume 'free'
+    const plan = restaurantData?.plan || 'free'; 
     const { emprataFee, restaurantAmount } = calculateEmprataFee(data.amount, plan);
-    
-    // ════════════════════════════════════════════════════════════════
-    // AI FRAUD GUARD - Risk Assessment
-    // ════════════════════════════════════════════════════════════════
-    let riskLevel: 'low' | 'medium' | 'high' = 'low';
-    
-    // Risk factor: High value orders
-    if (data.amount > 300) {
-      fraudScore += 30;
-      riskLevel = 'medium';
-    }
-    if (data.amount > 800) {
-      fraudScore += 40;
-      riskLevel = 'high';
-    }
-    
-    console.log(`[FRAUD GUARD] Order ${data.orderId}: Score ${fraudScore}, Risk: ${riskLevel}`);
-    
-    console.log(`[CHARGE] Order ${data.orderId}: Total ${data.amount}, ` +
-                `Emprata Fee: ${emprataFee}, Restaurant: ${restaurantAmount}`);
 
-    // Build split rules
-    const split: SplitRule[] = [
-      {
-        walletId: walletId,
-        fixedValue: restaurantAmount, // Restaurant gets this
-      }
-    ];
+    console.log(`[CHARGE] Pedido ${data.orderId} | Total: ${data.amount} | Split Restaurante: ${restaurantAmount} (Wallet: ${walletId})`);
 
-    // Build payment payload
-    const paymentPayload = {
-      // Customer
-      customer: data.customerData.cpfCnpj.replace(/\D/g, ''),
-      customerName: data.customerData.name,
-      
-      // Payment details
-      billingType: data.billingType || 'PIX',
+    // 5. Prepara Payload do Asaas
+    const payload: any = {
+      customer: await getOrCreateCustomer(data.customerData),
+      billingType: data.billingType,
       value: data.amount,
-      dueDate: data.dueDate || new Date().toISOString().split('T')[0],
-      description: data.description || `Pedido #${data.orderId.slice(-6).toUpperCase()}`,
-      
-      // External reference for webhook
+      dueDate: new Date().toISOString().split('T')[0], // Vence hoje
+      description: `Pedido #${data.orderId.slice(0, 8)} - EmprataAI`,
       externalReference: data.orderId,
-      
-      // Split configuration
-      split: split,
-      
-      // Pix settings
-      ...(data.billingType === 'PIX' && {
-        postalService: false,
-      }),
-      
-      // Credit card data
-      creditCard: data.creditCard,
-      creditCardHolderInfo: data.creditCardHolder
+      // O SPLIT É O SEGREDO DO MARKETPLACE
+      split: [
+        {
+          walletId: walletId,
+          fixedValue: restaurantAmount, // O restaurante recebe o valor já descontada a taxa da Emprata
+          percentualValue: undefined // Garantindo que não envie porcentagem
+        }
+      ],
+      postalService: false
     };
 
-    // Create payment in Asaas
+    // Se for Cartão, adiciona dados
+    if (data.billingType === 'CREDIT_CARD') {
+      if (!data.creditCard || !data.creditCardHolder) {
+        throw new functions.https.HttpsError('invalid-argument', 'Dados do cartão incompletos.');
+      }
+      payload.creditCard = data.creditCard;
+      payload.creditCardHolderInfo = data.creditCardHolder;
+    }
+
+    // 6. Envia para o Asaas
     const response = await axios.post(
       `${ASAAS_CONFIG.baseUrl}/payments`,
-      paymentPayload,
-      {
-        headers: {
-          'access_token': ASAAS_CONFIG.apiKey,
-          'Content-Type': 'application/json',
-        },
-      }
+      payload,
+      { headers: { 'access_token': ASAAS_CONFIG.apiKey } }
     );
 
     const payment = response.data;
 
-    // If PIX, get the QR code
+    // Se for Pix, busca o QRCode imediatamente
     let pixData = null;
     if (data.billingType === 'PIX') {
-      const pixResponse = await axios.get(
-        `${ASAAS_CONFIG.baseUrl}/payments/${payment.id}/pixQrCode`,
-        {
-          headers: {
-            'access_token': ASAAS_CONFIG.apiKey,
-          },
-        }
-      );
-      pixData = pixResponse.data;
+       const qrResponse = await axios.get(
+         `${ASAAS_CONFIG.baseUrl}/payments/${payment.id}/pixQrCode`,
+         { headers: { 'access_token': ASAAS_CONFIG.apiKey } }
+       );
+       pixData = qrResponse.data;
     }
 
-    // Update order with payment info
+    // 7. Atualiza o Pedido no Firestore
     await db.collection('orders').doc(data.orderId).update({
       paymentId: payment.id,
       paymentStatus: 'pending',
-      paymentMethod: data.billingType.toLowerCase(),
-      paymentUrl: payment.invoiceUrl,
-      emprataFee: emprataFee,
-      restaurantAmount: restaurantAmount,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      paymentMethod: data.billingType,
+      paymentUrl: payment.invoiceUrl, // Link da Fatura
+      pixCode: pixData?.payload || null,
+      pixImage: pixData?.encodedImage || null,
+      financial: {
+         total: data.amount,
+         platformFee: emprataFee,
+         restaurantReceive: restaurantAmount
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
     });
-
-    console.log(`[CHARGE] Payment created: ${payment.id}`);
 
     return {
       success: true,
       paymentId: payment.id,
-      status: payment.status,
-      value: payment.value,
-      dueDate: payment.dueDate,
       invoiceUrl: payment.invoiceUrl,
-      bankSlipUrl: payment.bankSlipUrl,
-      // Pix specific
-      pixCopyPaste: pixData?.payload,
-      pixQrCodeImage: pixData?.encodedImage, // Base64
-      // Fee breakdown
-      fees: {
-        total: data.amount,
-        emprataFee,
-        restaurantAmount,
-        plan,
-      },
-      // Fraud Guard
-      riskLevel,
-      fraudScore
+      pixCode: pixData?.payload,
+      pixImage: pixData?.encodedImage
     };
 
   } catch (error: any) {
-    console.error('[ASAAS CHARGE ERROR]', error.response?.data || error.message);
-
-    const errorMessage = error.response?.data?.errors?.[0]?.description 
-      || error.message 
-      || 'Erro ao gerar cobrança';
-
-    throw new functions.https.HttpsError('internal', errorMessage);
+    console.error('[CHARGE ERROR]', error.response?.data || error);
+    const msg = error.response?.data?.errors?.[0]?.description || error.message || 'Erro no processamento do pagamento.';
+    throw new functions.https.HttpsError('internal', msg);
   }
 });
+
+// Função auxiliar para não duplicar clientes no Asaas
+async function getOrCreateCustomer(customerData: any) {
+  // Simplificação: Busca pelo CPF/CNPJ direto na API do Asaas
+  // Em produção, ideal salvar o ID do customer no perfil do usuário do app
+  try {
+     const cleanCpf = customerData.cpfCnpj.replace(/\D/g, '');
+     
+     // 1. Tenta buscar
+     const search = await axios.get(
+       `${ASAAS_CONFIG.baseUrl}/customers?cpfCnpj=${cleanCpf}`,
+       { headers: { 'access_token': ASAAS_CONFIG.apiKey } }
+     );
+
+     if (search.data.data && search.data.data.length > 0) {
+       return search.data.data[0].id;
+     }
+
+     // 2. Se não achar, cria
+     const create = await axios.post(
+       `${ASAAS_CONFIG.baseUrl}/customers`,
+       {
+         name: customerData.name,
+         cpfCnpj: cleanCpf,
+         email: customerData.email || `cliente_${cleanCpf}@emprata.ai`,
+         mobilePhone: customerData.phone
+       },
+       { headers: { 'access_token': ASAAS_CONFIG.apiKey } }
+     );
+     
+     return create.data.id;
+
+  } catch (e) {
+    console.error('Erro ao gerenciar cliente Asaas:', e);
+    throw new functions.https.HttpsError('internal', 'Erro no cadastro do cliente financeiro.');
+  }
+}

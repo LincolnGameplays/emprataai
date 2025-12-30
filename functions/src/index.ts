@@ -20,7 +20,9 @@ const db = admin.firestore();
 export * from "./asaas/onboard";
 export * from "./asaas/charge";
 export * from "./asaas/webhook";   
-export * from "./asaas/subscribe"; 
+export * from "./asaas/subscribe";
+export * from "./asaas/wallet";
+export * from "./asaas/documents"; // ✅ NOVO: Wallet/Balance functions
 
 // ============================================================================
 // UTILS
@@ -28,7 +30,6 @@ export * from "./asaas/subscribe";
 
 // Função Auxiliar: Adicionar Créditos Manualmente
 export const addCreditsManually = functions.https.onCall(async (request) => {
-  // Extrai dados e auth do objeto request unificado (Sintaxe v2/Compatível)
   const { data, auth } = request;
 
   if (!auth) {

@@ -20,6 +20,7 @@ import StaffManagement from './pages/StaffManagement';
 import WaiterLogin from './pages/WaiterLogin';
 import WaiterApp from './pages/WaiterApp';
 import ProfilePage from './pages/ProfilePage';
+import UserProfile from './pages/admin/UserProfile';
 import SuccessPage from './pages/SuccessPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
@@ -107,6 +108,7 @@ export default function App() {
           
           {/* Perfil / Configurações */}
           <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/admin/profile" element={<UserProfile />} />
           
           {/* Gestão Financeira */}
           <Route path="/finance" element={<FinanceSettings />} />
