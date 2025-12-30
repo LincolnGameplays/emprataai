@@ -27,6 +27,29 @@ export interface UserData {
   credits: number;
   createdAt?: any;
   lastPurchase?: any;
+  
+  // Role-based access
+  role?: 'owner' | 'staff' | 'admin' | 'waiter' | 'consumer';
+  
+  // Consumer Marketplace fields
+  savedAddresses?: {
+    id: string;
+    label: string; // "Casa", "Trabalho"
+    address: string;
+    neighborhood?: string;
+    city?: string;
+    coords?: { lat: number; lng: number };
+  }[];
+  favorites?: string[]; // Restaurant IDs
+  emprataCoins?: number; // Gamification
+  
+  // Restaurant fields (for owners)
+  restaurantName?: string;
+  slug?: string;
+  logo?: string;
+  coverImage?: string;
+  cuisineType?: string;
+  deliveryFee?: number;
 }
 
 export function useAuth() {

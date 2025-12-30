@@ -1,8 +1,8 @@
 /**
- * ⚡ ASAAS WEBHOOK - Payment Confirmation Handler ⚡
- * Receives notifications from Asaas when payment status changes
- * 
- * POST /api/webhook/asaas
+ * ⚡ ASAAS WEBHOOK - Unified Payment Handler ⚡
+ * Handles both:
+ * - SaaS Subscriptions (100% to Emprata)
+ * - Pizza Sales with Split (commission to Emprata, rest to restaurant)
  */
 
 import * as functions from 'firebase-functions';
@@ -12,6 +12,17 @@ import { ASAAS_CONFIG, ASAAS_EVENTS } from './constants';
 // Initialize if not already
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
+
+// ══════════════════════════════════════════════════════════════════
+// PLAN DETECTION BY VALUE
+// ══════════════════════════════════════════════════════════════════
+
+function detectPlanFromValue(value: number): { plan: string; credits: number } {
+  if (value >= 390) return { plan: 'SCALE', credits: 500 };
+  if (value >= 190) return { plan: 'GROWTH', credits: 200 };
+  if (value >= 90) return { plan: 'STARTER', credits: 50 };
+  return { plan: 'FREE', credits: 0 };
+}
 
 // ══════════════════════════════════════════════════════════════════
 // TYPES
@@ -31,6 +42,7 @@ interface AsaasWebhookPayload {
     externalReference?: string;
     description?: string;
     invoiceUrl?: string;
+    subscription?: string; // Subscription ID if recurring
   };
 }
 
@@ -45,10 +57,10 @@ export const asaasWebhook = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  // Security: Verify webhook token
+  // Security: Verify webhook token (optional but recommended)
   const accessToken = req.headers['asaas-access-token'] || req.headers['access-token'];
   
-  if (accessToken !== ASAAS_CONFIG.webhookToken && ASAAS_CONFIG.webhookToken) {
+  if (ASAAS_CONFIG.webhookToken && accessToken !== ASAAS_CONFIG.webhookToken) {
     console.warn('[WEBHOOK] Invalid token received');
     res.status(401).send('Unauthorized');
     return;
@@ -62,32 +74,59 @@ export const asaasWebhook = functions.https.onRequest(async (req, res) => {
   }
 
   const { event, payment } = payload;
-  const orderId = payment.externalReference;
+  const externalRef = payment.externalReference;
+  const isSubscription = !!payment.subscription || payment.description?.includes('Assinatura');
 
-  console.log(`[WEBHOOK] Event: ${event}, Payment: ${payment.id}, Order: ${orderId}`);
+  console.log(`[WEBHOOK] Event: ${event}, Payment: ${payment.id}, ` +
+              `Ref: ${externalRef}, IsSubscription: ${isSubscription}`);
 
   try {
-    // Handle different events
-    switch (event) {
-      case ASAAS_EVENTS.PAYMENT_RECEIVED:
-      case ASAAS_EVENTS.PAYMENT_CONFIRMED:
-        await handlePaymentConfirmed(orderId, payment);
-        break;
+    // ════════════════════════════════════════════════════════════
+    // PAYMENT CONFIRMED
+    // ════════════════════════════════════════════════════════════
+    if (event === ASAAS_EVENTS.PAYMENT_RECEIVED || event === ASAAS_EVENTS.PAYMENT_CONFIRMED) {
+      
+      // TYPE A: SaaS Subscription Payment
+      if (isSubscription && externalRef) {
+        await handleSubscriptionPayment(externalRef, payment);
+        res.json({ received: true, type: 'subscription' });
+        return;
+      }
 
-      case ASAAS_EVENTS.PAYMENT_OVERDUE:
-        await handlePaymentOverdue(orderId, payment);
-        break;
-
-      case ASAAS_EVENTS.PAYMENT_REFUNDED:
-        await handlePaymentRefunded(orderId, payment);
-        break;
-
-      default:
-        console.log(`[WEBHOOK] Unhandled event: ${event}`);
+      // TYPE B: Restaurant Order (Split Payment)
+      if (externalRef && !isSubscription) {
+        await handleOrderPayment(externalRef, payment);
+        res.json({ received: true, type: 'order' });
+        return;
+      }
     }
 
-    res.status(200).json({ received: true, event });
-    
+    // ════════════════════════════════════════════════════════════
+    // PAYMENT OVERDUE
+    // ════════════════════════════════════════════════════════════
+    if (event === ASAAS_EVENTS.PAYMENT_OVERDUE && externalRef) {
+      if (isSubscription) {
+        await handleSubscriptionOverdue(externalRef);
+      } else {
+        await handleOrderOverdue(externalRef);
+      }
+      res.json({ received: true, type: 'overdue' });
+      return;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // PAYMENT REFUNDED
+    // ════════════════════════════════════════════════════════════
+    if (event === ASAAS_EVENTS.PAYMENT_REFUNDED && externalRef) {
+      await handleRefund(externalRef, payment, isSubscription);
+      res.json({ received: true, type: 'refund' });
+      return;
+    }
+
+    // Unhandled event
+    console.log(`[WEBHOOK] Unhandled event: ${event}`);
+    res.json({ received: true });
+
   } catch (error: any) {
     console.error('[WEBHOOK ERROR]', error.message);
     res.status(500).json({ error: error.message });
@@ -95,19 +134,53 @@ export const asaasWebhook = functions.https.onRequest(async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════
-// EVENT HANDLERS
+// HANDLER: SaaS Subscription Payment
 // ══════════════════════════════════════════════════════════════════
 
-async function handlePaymentConfirmed(
-  orderId: string | undefined,
+async function handleSubscriptionPayment(
+  userId: string,
   payment: AsaasWebhookPayload['payment']
 ) {
-  if (!orderId) {
-    console.warn('[WEBHOOK] No externalReference in payment');
-    return;
-  }
+  const { plan, credits } = detectPlanFromValue(payment.value);
 
-  // Find order by ID
+  console.log(`[SaaS] User ${userId} paid R$${payment.value} → Plan: ${plan}, Credits: ${credits}`);
+
+  // Calculate next renewal (30 days from now)
+  const renewsAt = new Date();
+  renewsAt.setDate(renewsAt.getDate() + 30);
+
+  await db.collection('users').doc(userId).update({
+    plan: plan.toLowerCase(),
+    credits: admin.firestore.FieldValue.increment(credits),
+    'subscription.status': 'active',
+    'subscription.lastPaymentAt': admin.firestore.FieldValue.serverTimestamp(),
+    'subscription.renewsAt': admin.firestore.Timestamp.fromDate(renewsAt),
+    'subscription.lastPaymentValue': payment.value,
+  });
+
+  // Audit log
+  await db.collection('audit_logs').add({
+    action: 'subscription_payment',
+    userId,
+    paymentId: payment.id,
+    value: payment.value,
+    plan,
+    credits,
+    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    severity: 'info',
+  });
+
+  console.log(`[SaaS] User ${userId} upgraded to ${plan} with ${credits} credits`);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HANDLER: Restaurant Order Payment (Split)
+// ══════════════════════════════════════════════════════════════════
+
+async function handleOrderPayment(
+  orderId: string,
+  payment: AsaasWebhookPayload['payment']
+) {
   const orderRef = db.collection('orders').doc(orderId);
   const orderDoc = await orderRef.get();
 
@@ -118,7 +191,6 @@ async function handlePaymentConfirmed(
 
   const orderData = orderDoc.data()!;
 
-  // Update order status
   await orderRef.update({
     status: 'preparing',
     paymentStatus: 'paid',
@@ -128,11 +200,11 @@ async function handlePaymentConfirmed(
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  console.log(`[WEBHOOK] Order ${orderId} marked as PAID and PREPARING`);
+  console.log(`[ORDER] Order ${orderId} marked as PAID and PREPARING`);
 
-  // Log to audit
+  // Audit log
   await db.collection('audit_logs').add({
-    action: 'payment_confirmed',
+    action: 'order_payment_confirmed',
     orderId,
     paymentId: payment.id,
     value: payment.value,
@@ -141,49 +213,65 @@ async function handlePaymentConfirmed(
     timestamp: admin.firestore.FieldValue.serverTimestamp(),
     severity: 'info',
   });
-
-  // TODO: Send notification to restaurant (push/email)
 }
 
-async function handlePaymentOverdue(
-  orderId: string | undefined,
-  payment: AsaasWebhookPayload['payment']
-) {
-  if (!orderId) return;
+// ══════════════════════════════════════════════════════════════════
+// HANDLER: Subscription Overdue
+// ══════════════════════════════════════════════════════════════════
 
-  const orderRef = db.collection('orders').doc(orderId);
-  
-  await orderRef.update({
+async function handleSubscriptionOverdue(userId: string) {
+  await db.collection('users').doc(userId).update({
+    'subscription.status': 'overdue',
+  });
+
+  console.log(`[SaaS] User ${userId} subscription OVERDUE`);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HANDLER: Order Overdue
+// ══════════════════════════════════════════════════════════════════
+
+async function handleOrderOverdue(orderId: string) {
+  await db.collection('orders').doc(orderId).update({
     paymentStatus: 'overdue',
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
-  console.log(`[WEBHOOK] Order ${orderId} payment OVERDUE`);
+  console.log(`[ORDER] Order ${orderId} payment OVERDUE`);
 }
 
-async function handlePaymentRefunded(
-  orderId: string | undefined,
-  payment: AsaasWebhookPayload['payment']
+// ══════════════════════════════════════════════════════════════════
+// HANDLER: Refund
+// ══════════════════════════════════════════════════════════════════
+
+async function handleRefund(
+  refId: string,
+  payment: AsaasWebhookPayload['payment'],
+  isSubscription: boolean
 ) {
-  if (!orderId) return;
+  if (isSubscription) {
+    // Downgrade to free on refund
+    await db.collection('users').doc(refId).update({
+      plan: 'free',
+      'subscription.status': 'refunded',
+    });
+    console.log(`[SaaS] User ${refId} subscription REFUNDED, downgraded to free`);
+  } else {
+    await db.collection('orders').doc(refId).update({
+      status: 'cancelled',
+      paymentStatus: 'refunded',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    console.log(`[ORDER] Order ${refId} REFUNDED and cancelled`);
+  }
 
-  const orderRef = db.collection('orders').doc(orderId);
-  
-  await orderRef.update({
-    status: 'cancelled',
-    paymentStatus: 'refunded',
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  // Log refund
+  // Audit log
   await db.collection('audit_logs').add({
-    action: 'payment_refunded',
-    orderId,
+    action: isSubscription ? 'subscription_refunded' : 'order_refunded',
+    refId,
     paymentId: payment.id,
     value: payment.value,
     timestamp: admin.firestore.FieldValue.serverTimestamp(),
     severity: 'warning',
   });
-
-  console.log(`[WEBHOOK] Order ${orderId} REFUNDED`);
 }

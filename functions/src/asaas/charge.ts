@@ -81,6 +81,27 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
     // Calculate fees
     const { emprataFee, restaurantAmount } = calculateEmprataFee(data.amount, plan);
     
+    // ════════════════════════════════════════════════════════════════
+    // AI FRAUD GUARD - Risk Assessment
+    // ════════════════════════════════════════════════════════════════
+    let riskLevel: 'low' | 'medium' | 'high' = 'low';
+    let fraudScore = 0;
+    
+    // Risk factor: High value orders
+    if (data.amount > 300) {
+      fraudScore += 30;
+      riskLevel = 'medium';
+    }
+    if (data.amount > 800) {
+      fraudScore += 40;
+      riskLevel = 'high';
+    }
+    
+    // Risk factor: First order (could add check for new customer)
+    // In production, you'd check customer history here
+    
+    console.log(`[FRAUD GUARD] Order ${data.orderId}: Score ${fraudScore}, Risk: ${riskLevel}`);
+    
     console.log(`[CHARGE] Order ${data.orderId}: Total ${data.amount}, ` +
                 `Emprata Fee: ${emprataFee}, Restaurant: ${restaurantAmount}`);
 
@@ -158,6 +179,8 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
         paymentUrl: payment.invoiceUrl,
         emprataFee: emprataFee,
         restaurantAmount: restaurantAmount,
+        fraudScore: fraudScore,
+        riskLevel: riskLevel,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     }
@@ -174,14 +197,17 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
       bankSlipUrl: payment.bankSlipUrl,
       // Pix specific
       pixCopyPaste: pixData?.payload,
-      pixQrCodeImage: pixData?.encodedImage, // Base64
+      pixQrCode: pixData?.encodedImage, // Base64
       // Fee breakdown
       fees: {
         total: data.amount,
         emprataFee,
         restaurantAmount,
         plan,
-      }
+      },
+      // Fraud Guard
+      riskLevel,
+      fraudScore,
     };
 
   } catch (error: any) {

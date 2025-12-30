@@ -37,6 +37,7 @@ export interface Order {
   id: string;
   restaurantId: string;
   ownerId?: string;
+  consumerId?: string; // For marketplace orders
   customer: Customer;
   items: OrderItem[];
   subtotal: number;
@@ -45,7 +46,20 @@ export interface Order {
   createdAt: any;
   updatedAt?: any;
   completedAt?: any;
-  paymentMethod: 'pix' | 'credit' | 'debit' | 'cash';
+  
+  // Enhanced Payment Methods
+  paymentMethod: 
+    | 'pix_online' 
+    | 'credit_online' 
+    | 'credit_machine' 
+    | 'debit_machine' 
+    | 'cash'
+    | 'pix' 
+    | 'credit' 
+    | 'debit';
+  paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded';
+  changeFor?: number; // If cash, customer needs change for this amount
+  
   isOrderBumpAccepted?: boolean;
   
   // Campos de Logística
@@ -58,17 +72,32 @@ export interface Order {
   deliveryAttemptCoords?: { lat: number; lng: number };
   dispatchedAt?: any;
   deliveredAt?: any;
+  estimatedDelivery?: { min: number; max: number }; // minutes
   
   // Campos de Analytics
   isPaid?: boolean;
   discountPercent?: number;
   discountAmount?: number;
+  emprataCoinsEarned?: number; // Gamification
+  couponCode?: string;
   
   // Campos de Restaurante
   restaurant?: {
     name?: string;
     phone?: string;
+    logoUrl?: string;
   };
+  
+  // Financial Gateway (Online payments)
+  paymentId?: string;          // Asaas payment ID
+  paymentUrl?: string;         // Invoice/Pix URL
+  emprataFee?: number;         // Platform commission
+  restaurantValue?: number;    // Restaurant net value
+  paidAt?: any;                // When payment was confirmed
+  
+  // AI Fraud Guard
+  fraudScore?: number;         // 0-100 risk score
+  riskLevel?: 'low' | 'medium' | 'high';
 }
 
 // Tipos para Dashboard e Analytics

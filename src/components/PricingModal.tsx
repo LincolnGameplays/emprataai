@@ -1,7 +1,16 @@
+/**
+ * ⚡ PRICING MODAL - Asaas Subscription Checkout ⚡
+ * Replaced Kirvano with Asaas subscription system
+ */
+
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Zap, CheckCircle2, Star, Sparkles, Crown } from 'lucide-react';
+import { X, Zap, CheckCircle2, Star, Sparkles, Crown, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
 import { Link } from 'react-router-dom';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../config/firebase';
+import { toast } from 'sonner';
 
 interface PricingModalProps {
   isOpen: boolean;
@@ -12,66 +21,97 @@ interface PricingModalProps {
 // PRICING VALUES - Single source of truth for conversion tracking
 // ══════════════════════════════════════════════════════════════════
 const PRICING = {
-  starter: { value: 97.00, content_name: 'Pack Delivery' },
-  pro: { value: 197.00, content_name: 'Franquia / Pro' }
+  starter: { value: 97.00, content_name: 'Pack Delivery', asaasPlan: 'STARTER' },
+  pro: { value: 197.00, content_name: 'Franquia / Pro', asaasPlan: 'GROWTH' }
 } as const;
 
 export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
   const user = useAppStore((state) => state.userId);
+  const [loading, setLoading] = useState<'starter' | 'pro' | null>(null);
   
   /**
-   * Handle checkout process with conversion funnel tracking
-   * 1. Saves purchase intent value to sessionStorage
-   * 2. Fires InitiateCheckout event for Meta Pixel
-   * 3. Opens Kirvano checkout link
-   * @param planType - 'starter' or 'pro'
+   * Handle checkout process with Asaas Subscription
+   * 1. Fires tracking events
+   * 2. Calls createSubscription Cloud Function
+   * 3. Redirects to Asaas payment page
    */
-  const handleCheckout = (planType: 'starter' | 'pro') => {
-    const links = {
-      starter: "https://pay.kirvano.com/30cef9d1-c08e-49ed-b361-2862f182485f",
-      pro: "https://pay.kirvano.com/b26facd0-9585-4b17-8b68-d58aaf659939"
-    };
-
-    const purchaseValue = PRICING[planType].value;
-
-    // ════════════════════════════════════════════════════════════════
-    // STEP 1: Save purchase intent to sessionStorage for SuccessPage
-    // ════════════════════════════════════════════════════════════════
-    sessionStorage.setItem('purchase_intent_value', purchaseValue.toString());
-
-    // ════════════════════════════════════════════════════════════════
-    // STEP 2: Meta Pixel - Fire InitiateCheckout event BEFORE redirect
-    // ════════════════════════════════════════════════════════════════
-    if (typeof window.fbq === 'function') {
-      window.fbq('track', 'InitiateCheckout', {
-        value: purchaseValue,
-        currency: 'BRL',
-        content_name: PRICING[planType].content_name
-      });
-    }
-
-    // ════════════════════════════════════════════════════════════════
-    // STEP 3: GA4 - Fire begin_checkout event
-    // ════════════════════════════════════════════════════════════════
-    if (typeof window.gtag === 'function') {
-      window.gtag('event', 'begin_checkout', {
-        value: purchaseValue,
-        currency: 'BRL',
-        items: [{
-          item_name: PRICING[planType].content_name,
-          price: purchaseValue,
-          quantity: 1
-        }]
-      });
-    }
-
-    // ════════════════════════════════════════════════════════════════
-    // STEP 4: Open checkout link with external_id if logged in
-    // ════════════════════════════════════════════════════════════════
-    const baseUrl = links[planType];
-    const finalLink = user ? `${baseUrl}?external_id=${user}` : baseUrl;
+  const handleCheckout = async (planType: 'starter' | 'pro') => {
+    const plan = PRICING[planType];
     
-    window.open(finalLink, "_blank");
+    // If not logged in, redirect to auth first
+    if (!user) {
+      toast.error('Faça login para assinar');
+      onClose();
+      window.location.href = '/auth?redirect=pricing';
+      return;
+    }
+
+    setLoading(planType);
+
+    try {
+      // ════════════════════════════════════════════════════════════════
+      // STEP 1: Save purchase intent to sessionStorage for SuccessPage
+      // ════════════════════════════════════════════════════════════════
+      sessionStorage.setItem('purchase_intent_value', plan.value.toString());
+
+      // ════════════════════════════════════════════════════════════════
+      // STEP 2: Meta Pixel - Fire InitiateCheckout event
+      // ════════════════════════════════════════════════════════════════
+      if (typeof window.fbq === 'function') {
+        window.fbq('track', 'InitiateCheckout', {
+          value: plan.value,
+          currency: 'BRL',
+          content_name: plan.content_name
+        });
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // STEP 3: GA4 - Fire begin_checkout event
+      // ════════════════════════════════════════════════════════════════
+      if (typeof window.gtag === 'function') {
+        window.gtag('event', 'begin_checkout', {
+          value: plan.value,
+          currency: 'BRL',
+          items: [{
+            item_name: plan.content_name,
+            price: plan.value,
+            quantity: 1
+          }]
+        });
+      }
+
+      // ════════════════════════════════════════════════════════════════
+      // STEP 4: Call Asaas createSubscription Cloud Function
+      // ════════════════════════════════════════════════════════════════
+      const createSub = httpsCallable(functions, 'createSubscription');
+      
+      const result = await createSub({
+        plan: plan.asaasPlan,
+        billingType: 'PIX' // Default to PIX (most popular in Brazil)
+      });
+
+      const data = result.data as { 
+        success: boolean; 
+        invoiceUrl?: string;
+        pixCopyPaste?: string;
+      };
+
+      if (data.success && data.invoiceUrl) {
+        // Redirect to Asaas payment page
+        toast.success('Redirecionando para pagamento...');
+        window.open(data.invoiceUrl, '_blank');
+      } else if (data.pixCopyPaste) {
+        // Show Pix code (could implement a modal here)
+        navigator.clipboard.writeText(data.pixCopyPaste);
+        toast.success('Código Pix copiado! Cole no seu banco.');
+      }
+
+    } catch (error: any) {
+      console.error('Checkout error:', error);
+      toast.error(error.message || 'Erro ao processar assinatura');
+    } finally {
+      setLoading(null);
+    }
   };
   
   return (
@@ -204,9 +244,14 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                   
                   <button 
                     onClick={() => handleCheckout('starter')}
-                    className="w-full py-5 rounded-2xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto"
+                    disabled={loading !== null}
+                    className="w-full py-5 rounded-2xl bg-blue-500 hover:bg-blue-600 font-black text-white shadow-xl shadow-blue-500/30 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    Comprar Pack
+                    {loading === 'starter' ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      'Comprar Pack'
+                    )}
                   </button>
                 </div>
 
@@ -267,10 +312,17 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
                   
                   <button 
                     onClick={() => handleCheckout('pro')}
-                    className="w-full py-5 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto relative z-10"
+                    disabled={loading !== null}
+                    className="w-full py-5 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-tighter text-base transition-all hover:scale-[1.02] active:scale-95 mt-auto relative z-10 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
-                    <Star className="w-5 h-5 inline-block mr-2 fill-current" />
-                    Quero Lucro Máximo
+                    {loading === 'pro' ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Star className="w-5 h-5 fill-current" />
+                        Quero Lucro Máximo
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -278,7 +330,7 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
 
               {/* Footer Note */}
               <p className="text-center text-xs font-black uppercase tracking-widest text-white/20 mt-8">
-                Pagamento 100% Seguro • Processado pela Kirvano
+                Pagamento 100% Seguro • Processado pela Asaas
               </p>
             </div>
           </motion.div>

@@ -29,6 +29,11 @@ import WhatsappTool from './pages/WhatsappTool';
 import DispatchConsole from './pages/DispatchConsole';
 import DriverApp from './pages/DriverApp';
 import DeliveryTracking from './pages/DeliveryTracking';
+import FinanceSettings from './pages/admin/FinanceSettings';
+
+// Marketplace (Consumer)
+import MarketplaceHome from './pages/marketplace/Home';
+import ConsumerProfile from './pages/marketplace/ConsumerProfile';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -60,6 +65,11 @@ export default function App() {
         
         {/* Cardápio Público */}
         <Route path="/menu/:slug" element={<PublicMenu />} />
+        
+        {/* Marketplace (Consumer App) */}
+        <Route path="/marketplace" element={<MarketplaceHome />} />
+        <Route path="/delivery" element={<MarketplaceHome />} />
+        <Route path="/me" element={<ConsumerProfile />} />
         
         {/* Delivery Tracking (Public) */}
         <Route path="/track/:orderId" element={<DeliveryTracking />} />
@@ -97,6 +107,9 @@ export default function App() {
           
           {/* Perfil / Configurações */}
           <Route path="/profile" element={<ProfilePage />} />
+          
+          {/* Gestão Financeira */}
+          <Route path="/finance" element={<FinanceSettings />} />
           
           {/* Sucesso Pagamento */}
           <Route path="/success" element={<SuccessPage />} />

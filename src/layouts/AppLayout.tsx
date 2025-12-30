@@ -8,7 +8,7 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, Camera, UtensilsCrossed, Users, Settings,
-  Menu, X, ChevronRight
+  Menu, X, ChevronRight, DollarSign
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
@@ -31,6 +31,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
   { path: '/studio', label: 'Estúdio IA', icon: <Camera className="w-5 h-5" /> },
   { path: '/menu-builder', label: 'Cardápio', icon: <UtensilsCrossed className="w-5 h-5" /> },
+  { path: '/finance', label: 'Financeiro', icon: <DollarSign className="w-5 h-5" />, ownerOnly: true },
   { path: '/staff', label: 'Equipe', icon: <Users className="w-5 h-5" />, ownerOnly: true },
   { path: '/profile', label: 'Configurações', icon: <Settings className="w-5 h-5" /> },
 ];
@@ -40,6 +41,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/studio': 'Estúdio de Criação',
   '/menu-builder': 'Construtor de Cardápio',
+  '/finance': 'Gestão Financeira',
   '/staff': 'Gestão de Equipe',
   '/profile': 'Configurações',
 };
