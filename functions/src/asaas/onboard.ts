@@ -1,7 +1,7 @@
 /**
  * ⚡ ASAAS ONBOARD - Subconta Creation ⚡
  * Creates a wallet/subaccount for the restaurant in Asaas
- * * POST /api/finance/onboard
+ * POST /api/finance/onboard
  */
 
 import * as functions from 'firebase-functions';
@@ -9,89 +9,87 @@ import * as admin from 'firebase-admin';
 import axios from 'axios';
 import { ASAAS_CONFIG } from './constants';
 
-// Initialize if not already
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
 // ══════════════════════════════════════════════════════════════════
-// TYPES
+// TYPES (Atualizado com todos os campos possíveis)
 // ══════════════════════════════════════════════════════════════════
 
 interface OnboardRequest {
   name: string;
   email: string;
   cpfCnpj: string;
+  birthDate?: string; // Obrigatório para CPF/MEI (YYYY-MM-DD)
+  companyType: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION' | 'UNKNOWN';
   phone: string;
+  incomeValue?: number; // Renda estimada
   postalCode: string;
   address: string;
   addressNumber: string;
-  province: string; // Bairro
-  city: string;
+  complement?: string;
+  province: string;
+  city: string; // Se possível enviar o ID da cidade IBGE, melhor, mas nome funciona na maioria
   state: string;
-  companyType?: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION';
 }
 
 // ══════════════════════════════════════════════════════════════════
-// MAIN FUNCTION (CORRIGIDO PARA V2: request)
+// MAIN FUNCTION
 // ══════════════════════════════════════════════════════════════════
 
-// Observe que agora recebemos (request) e extraímos data/auth de dentro dele
 export const financeOnboard = functions.https.onCall(async (request) => {
   const data = request.data as OnboardRequest;
   const auth = request.auth;
 
-  // 1. Auth check
   if (!auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be logged in');
   }
 
-  const uid = auth.uid;
-  
-  // 2. Validate required fields
-  // Nota: 'province' (Bairro) não é obrigatório na validação, mas enviamos 'Centro' como fallback
-  const required = ['name', 'email', 'cpfCnpj', 'phone', 'postalCode', 'address', 'addressNumber', 'city', 'state'];
+  // 1. Validação de Campos Obrigatórios
+  const required = ['name', 'email', 'cpfCnpj', 'phone', 'postalCode', 'address', 'addressNumber', 'city', 'state', 'companyType'];
   
   for (const field of required) {
-    // Verifica se o campo existe e não é vazio
     if (!data[field as keyof OnboardRequest]) {
-      console.error(`[ONBOARD] Missing field: ${field}`, data);
-      throw new functions.https.HttpsError('invalid-argument', `Campo obrigatório: ${field}`);
+      throw new functions.https.HttpsError('invalid-argument', `Campo obrigatório faltando: ${field}`);
     }
   }
 
-  // 3. Check if already onboarded
-  const userDoc = await db.collection('users').doc(uid).get();
-  const existingAsaasId = userDoc.data()?.finance?.asaasAccountId;
-  
-  if (existingAsaasId) {
-    return { 
-      success: true, 
-      accountId: existingAsaasId,
-      message: 'Conta já estava ativa' 
-    };
+  // Validação Condicional: Nascimento é obrigatório para Pessoa Física ou MEI
+  const isPerson = data.cpfCnpj.replace(/\D/g, '').length === 11;
+  if ((isPerson || data.companyType === 'MEI') && !data.birthDate) {
+    throw new functions.https.HttpsError('invalid-argument', 'Data de nascimento é obrigatória para CPF ou MEI.');
   }
 
   try {
-    console.log(`[ONBOARD] Creating account for ${data.email}...`);
+    const uid = auth.uid;
 
-    // 4. Create Asaas subaccount
+    // 2. Prepara payload para o Asaas
+    const payload = {
+      name: data.name,
+      email: data.email,
+      loginEmail: data.email,
+      cpfCnpj: data.cpfCnpj.replace(/\D/g, ''),
+      birthDate: data.birthDate, // Formato esperado: 'YYYY-MM-DD'
+      companyType: data.companyType || (isPerson ? 'INDIVIDUAL' : 'LIMITED'),
+      phone: data.phone.replace(/\D/g, ''),
+      mobilePhone: data.phone.replace(/\D/g, ''),
+      incomeValue: data.incomeValue || 5000, // Valor padrão se não informado
+      postalCode: data.postalCode.replace(/\D/g, ''),
+      address: data.address,
+      addressNumber: data.addressNumber,
+      complement: data.complement || '',
+      province: data.province || 'Centro',
+      city: 0, // 0 para deixar o Asaas inferir pelo CEP
+      state: data.state,
+      country: 'BR'
+    };
+
+    console.log(`[ONBOARD] Enviando para Asaas:`, payload);
+
+    // 3. Cria a conta
     const response = await axios.post(
       `${ASAAS_CONFIG.baseUrl}/accounts`,
-      {
-        name: data.name,
-        email: data.email,
-        loginEmail: data.email, // O restaurante fará login com esse email
-        cpfCnpj: data.cpfCnpj.replace(/\D/g, ''), // Remove formatação (pontos/traços)
-        phone: data.phone.replace(/\D/g, ''),
-        mobilePhone: data.phone.replace(/\D/g, ''),
-        postalCode: data.postalCode.replace(/\D/g, ''),
-        address: data.address,
-        addressNumber: data.addressNumber,
-        province: data.province || 'Centro', // Fallback obrigatório se vazio
-        city: 0, // 0 deixa o Asaas inferir pelo CEP (mais seguro se não tiver o ID da cidade)
-        state: data.state,
-        companyType: data.companyType || 'MEI',
-      },
+      payload,
       {
         headers: {
           'access_token': ASAAS_CONFIG.apiKey,
@@ -102,33 +100,31 @@ export const financeOnboard = functions.https.onCall(async (request) => {
 
     const asaasAccount = response.data;
     
-    // 5. Save to Firestore
+    // 4. Salva no Firestore
     await db.collection('users').doc(uid).set({
       finance: {
         asaasAccountId: asaasAccount.id,
-        asaasWalletId: asaasAccount.walletId || asaasAccount.id, // Fallback para ID se walletId vier null
-        asaasApiKey: asaasAccount.apiKey || null, // Chave individual da subconta (se disponível)
+        asaasWalletId: asaasAccount.walletId || asaasAccount.id,
+        asaasApiKey: asaasAccount.apiKey || null,
+        companyType: data.companyType,
         onboardedAt: admin.firestore.FieldValue.serverTimestamp(),
         status: 'active',
+        errors: null // Limpa erros anteriores se houver
       }
     }, { merge: true });
-
-    console.log(`[ASAAS] Account created for user ${uid}: ${asaasAccount.id}`);
 
     return {
       success: true,
       accountId: asaasAccount.id,
-      walletId: asaasAccount.walletId,
       message: 'Conta ativada com sucesso!'
     };
 
   } catch (error: any) {
     console.error('[ASAAS ONBOARD ERROR]', error.response?.data || error.message);
-
-    // Tenta extrair a mensagem de erro específica do Asaas
-    const errorMessage = error.response?.data?.errors?.[0]?.description 
-      || error.message 
-      || 'Erro ao criar conta financeira';
+    
+    // Extrai mensagem amigável do Asaas
+    const apiError = error.response?.data?.errors?.[0]?.description;
+    const errorMessage = apiError || error.message || 'Erro ao criar conta financeira';
 
     throw new functions.https.HttpsError('internal', errorMessage);
   }
