@@ -1,13 +1,13 @@
 /**
- * ⚡ PRICING MODAL - Asaas Subscription Checkout ⚡
- * Replaced Kirvano with Asaas subscription system
+ * ⚡ PRICING MODAL - Asaas Subscription with Pending Plan Flow ⚡
+ * Handles both logged-in and anonymous users
  */
 
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Zap, CheckCircle2, Star, Sparkles, Crown, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store/useAppStore';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../config/firebase';
 import { toast } from 'sonner';
@@ -18,7 +18,7 @@ interface PricingModalProps {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// PRICING VALUES - Single source of truth for conversion tracking
+// PRICING VALUES - Single source of truth
 // ══════════════════════════════════════════════════════════════════
 const PRICING = {
   starter: { value: 97.00, content_name: 'Pack Delivery', asaasPlan: 'STARTER' },
@@ -27,36 +27,37 @@ const PRICING = {
 
 export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
   const user = useAppStore((state) => state.userId);
+  const navigate = useNavigate();
   const [loading, setLoading] = useState<'starter' | 'pro' | null>(null);
   
   /**
-   * Handle checkout process with Asaas Subscription
-   * 1. Fires tracking events
-   * 2. Calls createSubscription Cloud Function
-   * 3. Redirects to Asaas payment page
+   * Handle checkout process
+   * - Unauthenticated: Save plan to session, redirect to login
+   * - Authenticated: Call Asaas createSubscription, redirect to payment
    */
   const handleCheckout = async (planType: 'starter' | 'pro') => {
     const plan = PRICING[planType];
     
-    // If not logged in, redirect to auth first
+    // Save intent for analytics
+    sessionStorage.setItem('purchase_intent_value', plan.value.toString());
+
+    // ════════════════════════════════════════════════════════════════
+    // FLOW 1: NOT LOGGED IN → Save plan & redirect to auth
+    // ════════════════════════════════════════════════════════════════
     if (!user) {
-      toast.error('Faça login para assinar');
+      sessionStorage.setItem('pending_plan', planType);
       onClose();
-      window.location.href = '/auth?redirect=pricing';
+      navigate('/auth');
       return;
     }
 
+    // ════════════════════════════════════════════════════════════════
+    // FLOW 2: LOGGED IN → Create Asaas subscription
+    // ════════════════════════════════════════════════════════════════
     setLoading(planType);
 
     try {
-      // ════════════════════════════════════════════════════════════════
-      // STEP 1: Save purchase intent to sessionStorage for SuccessPage
-      // ════════════════════════════════════════════════════════════════
-      sessionStorage.setItem('purchase_intent_value', plan.value.toString());
-
-      // ════════════════════════════════════════════════════════════════
-      // STEP 2: Meta Pixel - Fire InitiateCheckout event
-      // ════════════════════════════════════════════════════════════════
+      // Meta Pixel tracking
       if (typeof window.fbq === 'function') {
         window.fbq('track', 'InitiateCheckout', {
           value: plan.value,
@@ -65,45 +66,30 @@ export default function PricingModal({ isOpen, onClose }: PricingModalProps) {
         });
       }
 
-      // ════════════════════════════════════════════════════════════════
-      // STEP 3: GA4 - Fire begin_checkout event
-      // ════════════════════════════════════════════════════════════════
+      // GA4 tracking
       if (typeof window.gtag === 'function') {
         window.gtag('event', 'begin_checkout', {
           value: plan.value,
           currency: 'BRL',
-          items: [{
-            item_name: plan.content_name,
-            price: plan.value,
-            quantity: 1
-          }]
+          items: [{ item_name: plan.content_name, price: plan.value, quantity: 1 }]
         });
       }
 
-      // ════════════════════════════════════════════════════════════════
-      // STEP 4: Call Asaas createSubscription Cloud Function
-      // ════════════════════════════════════════════════════════════════
+      // Call Asaas subscription function
       const createSub = httpsCallable(functions, 'createSubscription');
       
       const result = await createSub({
         plan: plan.asaasPlan,
-        billingType: 'PIX' // Default to PIX (most popular in Brazil)
+        billingType: 'PIX'
       });
 
-      const data = result.data as { 
-        success: boolean; 
-        invoiceUrl?: string;
-        pixCopyPaste?: string;
-      };
+      const data = result.data as { success: boolean; invoiceUrl?: string };
 
       if (data.success && data.invoiceUrl) {
-        // Redirect to Asaas payment page
         toast.success('Redirecionando para pagamento...');
-        window.open(data.invoiceUrl, '_blank');
-      } else if (data.pixCopyPaste) {
-        // Show Pix code (could implement a modal here)
-        navigator.clipboard.writeText(data.pixCopyPaste);
-        toast.success('Código Pix copiado! Cole no seu banco.');
+        window.location.href = data.invoiceUrl;
+      } else {
+        throw new Error('Falha ao gerar pagamento');
       }
 
     } catch (error: any) {

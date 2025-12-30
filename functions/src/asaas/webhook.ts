@@ -118,7 +118,7 @@ export const asaasWebhook = functions.https.onRequest(async (req, res) => {
     // PAYMENT REFUNDED
     // ════════════════════════════════════════════════════════════
     if (event === ASAAS_EVENTS.PAYMENT_REFUNDED && externalRef) {
-      await handleRefund(externalRef, payment, isSubscription);
+      await handleRefund(externalRef, payment, !!isSubscription);
       res.json({ received: true, type: 'refund' });
       return;
     }

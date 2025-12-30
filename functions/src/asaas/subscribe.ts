@@ -33,160 +33,165 @@ interface SubscriptionRequest {
   cpfCnpj?: string;
 }
 
-export const createSubscription = functions.https.onCall(
-  async (data: SubscriptionRequest, context) => {
-    // 1. Auth check
-    if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'Login necessário');
+// CORRIGIDO: Assinatura (request)
+export const createSubscription = functions.https.onCall(async (request) => {
+  const data = request.data as SubscriptionRequest;
+  const auth = request.auth;
+
+  // 1. Auth check
+  if (!auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Login necessário');
+  }
+
+  const uid = auth.uid;
+  const { plan, billingType, cpfCnpj } = data;
+
+  // Validate plan
+  if (!PLANS[plan]) {
+    throw new functions.https.HttpsError('invalid-argument', 'Plano inválido');
+  }
+
+  const planData = PLANS[plan];
+
+  try {
+    // 2. Get user data
+    const userDoc = await db.collection('users').doc(uid).get();
+    const userData = userDoc.data();
+
+    if (!userData) {
+      throw new functions.https.HttpsError('not-found', 'Usuário não encontrado');
     }
 
-    const uid = context.auth.uid;
-    const { plan, billingType, cpfCnpj } = data;
+    // 3. Create or retrieve Asaas Customer
+    let customerId = userData.asaasCustomerId;
 
-    // Validate plan
-    if (!PLANS[plan]) {
-      throw new functions.https.HttpsError('invalid-argument', 'Plano inválido');
-    }
-
-    const planData = PLANS[plan];
-
-    try {
-      // 2. Get user data
-      const userDoc = await db.collection('users').doc(uid).get();
-      const userData = userDoc.data();
-
-      if (!userData) {
-        throw new functions.https.HttpsError('not-found', 'Usuário não encontrado');
-      }
-
-      // 3. Create or retrieve Asaas Customer
-      let customerId = userData.asaasCustomerId;
-
-      if (!customerId) {
-        // Need CPF/CNPJ to create customer
-        const customerCpfCnpj = cpfCnpj || userData.cpfCnpj || userData.cpf;
-        
-        if (!customerCpfCnpj) {
-          throw new functions.https.HttpsError(
-            'invalid-argument',
-            'CPF/CNPJ é obrigatório para criar assinatura'
-          );
-        }
-
-        const customerRes = await axios.post(
-          `${ASAAS_CONFIG.baseUrl}/customers`,
-          {
-            name: userData.name || userData.displayName || `Usuário ${uid.slice(0, 8)}`,
-            email: userData.email,
-            cpfCnpj: customerCpfCnpj.replace(/\D/g, ''),
-            externalReference: uid,
-          },
-          {
-            headers: { access_token: ASAAS_CONFIG.apiKey },
-          }
+    if (!customerId) {
+      // Need CPF/CNPJ to create customer
+      const customerCpfCnpj = cpfCnpj || userData.cpfCnpj || userData.cpf;
+      
+      if (!customerCpfCnpj) {
+        throw new functions.https.HttpsError(
+          'invalid-argument',
+          'CPF/CNPJ é obrigatório para criar assinatura'
         );
-
-        customerId = customerRes.data.id;
-
-        // Save for future use
-        await db.collection('users').doc(uid).update({
-          asaasCustomerId: customerId,
-        });
-
-        console.log(`[ASAAS] Customer created: ${customerId} for user ${uid}`);
       }
 
-      // 4. Create Subscription
-      const today = new Date().toISOString().split('T')[0];
-
-      const subscriptionRes = await axios.post(
-        `${ASAAS_CONFIG.baseUrl}/subscriptions`,
+      const customerRes = await axios.post(
+        `${ASAAS_CONFIG.baseUrl}/customers`,
         {
-          customer: customerId,
-          billingType: billingType,
-          value: planData.price,
-          nextDueDate: today, // Charge today
-          cycle: 'MONTHLY',
-          description: `Assinatura EmprataAI - Plano ${planData.label}`,
-          externalReference: uid, // Important for webhook
+          name: userData.name || userData.displayName || `Usuário ${uid.slice(0, 8)}`,
+          email: userData.email,
+          cpfCnpj: customerCpfCnpj.replace(/\D/g, ''),
+          externalReference: uid,
         },
         {
           headers: { access_token: ASAAS_CONFIG.apiKey },
         }
       );
 
-      const subscription = subscriptionRes.data;
+      customerId = customerRes.data.id;
 
-      // 5. Save subscription info
+      // Save for future use
       await db.collection('users').doc(uid).update({
-        subscription: {
-          id: subscription.id,
-          plan: plan,
-          status: 'pending',
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
+        asaasCustomerId: customerId,
       });
 
-      console.log(`[ASAAS] Subscription created: ${subscription.id} for user ${uid}`);
+      console.log(`[ASAAS] Customer created: ${customerId} for user ${uid}`);
+    }
 
-      // 6. Get first payment link (if PIX, get QR code)
-      let pixData = null;
-      
-      if (billingType === 'PIX' && subscription.id) {
-        try {
-          // Get the first payment generated by subscription
-          const paymentsRes = await axios.get(
-            `${ASAAS_CONFIG.baseUrl}/payments?subscription=${subscription.id}`,
+    // 4. Create Subscription
+    const today = new Date().toISOString().split('T')[0];
+
+    const subscriptionRes = await axios.post(
+      `${ASAAS_CONFIG.baseUrl}/subscriptions`,
+      {
+        customer: customerId,
+        billingType: billingType,
+        value: planData.price,
+        nextDueDate: today, // Charge today
+        cycle: 'MONTHLY',
+        description: `Assinatura EmprataAI - Plano ${planData.label}`,
+        externalReference: uid, // Important for webhook
+      },
+      {
+        headers: { access_token: ASAAS_CONFIG.apiKey },
+      }
+    );
+
+    const subscription = subscriptionRes.data;
+
+    // 5. Save subscription info
+    await db.collection('users').doc(uid).update({
+      subscription: {
+        id: subscription.id,
+        plan: plan,
+        status: 'pending',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+    });
+
+    console.log(`[ASAAS] Subscription created: ${subscription.id} for user ${uid}`);
+
+    // 6. Get first payment link (if PIX, get QR code)
+    let pixData = null;
+    
+    if (billingType === 'PIX' && subscription.id) {
+      try {
+        // Get the first payment generated by subscription
+        const paymentsRes = await axios.get(
+          `${ASAAS_CONFIG.baseUrl}/payments?subscription=${subscription.id}`,
+          { headers: { access_token: ASAAS_CONFIG.apiKey } }
+        );
+
+        const firstPayment = paymentsRes.data.data?.[0];
+        
+        if (firstPayment?.id) {
+          const pixRes = await axios.get(
+            `${ASAAS_CONFIG.baseUrl}/payments/${firstPayment.id}/pixQrCode`,
             { headers: { access_token: ASAAS_CONFIG.apiKey } }
           );
-
-          const firstPayment = paymentsRes.data.data?.[0];
-          
-          if (firstPayment?.id) {
-            const pixRes = await axios.get(
-              `${ASAAS_CONFIG.baseUrl}/payments/${firstPayment.id}/pixQrCode`,
-              { headers: { access_token: ASAAS_CONFIG.apiKey } }
-            );
-            pixData = pixRes.data;
-          }
-        } catch (e) {
-          console.warn('[ASAAS] Could not fetch PIX QR code');
+          pixData = pixRes.data;
         }
+      } catch (e) {
+        console.warn('[ASAAS] Could not fetch PIX QR code');
       }
-
-      return {
-        success: true,
-        subscriptionId: subscription.id,
-        invoiceUrl: subscription.bankSlipUrl || subscription.invoiceUrl,
-        pixCopyPaste: pixData?.payload,
-        pixQrCodeImage: pixData?.encodedImage,
-        plan: planData.label,
-        value: planData.price,
-      };
-
-    } catch (error: any) {
-      console.error('[ASAAS SUBSCRIBE ERROR]', error.response?.data || error.message);
-
-      const errorMessage =
-        error.response?.data?.errors?.[0]?.description ||
-        error.message ||
-        'Erro ao criar assinatura';
-
-      throw new functions.https.HttpsError('internal', errorMessage);
     }
+
+    return {
+      success: true,
+      subscriptionId: subscription.id,
+      invoiceUrl: subscription.bankSlipUrl || subscription.invoiceUrl,
+      pixCopyPaste: pixData?.payload,
+      pixQrCodeImage: pixData?.encodedImage,
+      plan: planData.label,
+      value: planData.price,
+    };
+
+  } catch (error: any) {
+    console.error('[ASAAS SUBSCRIBE ERROR]', error.response?.data || error.message);
+
+    const errorMessage =
+      error.response?.data?.errors?.[0]?.description ||
+      error.message ||
+      'Erro ao criar assinatura';
+
+    throw new functions.https.HttpsError('internal', errorMessage);
   }
-);
+});
 
 // ══════════════════════════════════════════════════════════════════
 // CANCEL SUBSCRIPTION
 // ══════════════════════════════════════════════════════════════════
 
-export const cancelSubscription = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
+// CORRIGIDO: Assinatura (request)
+export const cancelSubscription = functions.https.onCall(async (request) => {
+  const auth = request.auth;
+
+  if (!auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Login necessário');
   }
 
-  const uid = context.auth.uid;
+  const uid = auth.uid;
 
   try {
     const userDoc = await db.collection('users').doc(uid).get();

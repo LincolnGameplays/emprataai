@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { IMaskInput } from 'react-imask';
 import SocialProofTicker from '../components/SocialProofTicker';
 import { rewriteDescription, UserVibe, VIBE_METADATA } from '../services/neuroCopy';
+import CheckoutFlow from '../components/checkout/CheckoutFlow';
 
 // Interfaces simplificadas para o componente
 interface MenuItem {
@@ -48,7 +49,8 @@ export default function PublicMenu() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [customer, setCustomer] = useState({ name: '', cpf: '', table: '' });
+  const [customer, setCustomer] = useState({ name: '', cpf: '', table: '', phone: '' });
+  const [customerConfirmed, setCustomerConfirmed] = useState(false);
   
   // Order Success State (with delivery PIN)
   const [orderSuccess, setOrderSuccess] = useState<OrderSuccess | null>(null);
@@ -221,6 +223,48 @@ export default function PublicMenu() {
       setIsCartOpen(false);
     } catch (e) {
       toast.error("Erro ao enviar pedido");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle checkout with payment data from CheckoutFlow
+  const handleCheckoutFinal = async (paymentData: any) => {
+    try {
+      setLoading(true);
+      const deliveryPin = Math.floor(1000 + Math.random() * 9000).toString();
+      
+      const orderRef = await addDoc(collection(db, 'orders'), {
+        restaurantId: restaurant.ownerId,
+        customer,
+        items: cart,
+        total: cartTotal,
+        
+        // Payment data from CheckoutFlow
+        paymentMethod: paymentData.paymentMethod,
+        paymentStatus: paymentData.paymentStatus || 'pending',
+        changeFor: paymentData.changeFor,
+        paymentId: paymentData.paymentId,
+        
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        deliveryPin,
+        isOrderBumpAccepted: false,
+      });
+
+      setOrderSuccess({
+        orderId: orderRef.id,
+        deliveryPin,
+        total: cartTotal
+      });
+      
+      setCart([]);
+      setCustomerConfirmed(false);
+      setIsCheckoutOpen(false);
+      setIsCartOpen(false);
+    } catch (e) {
+      toast.error("Erro ao finalizar pedido");
+      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -420,69 +464,115 @@ export default function PublicMenu() {
         </div>
       )}
 
-      {/* CHECKOUT MODAL (DADOS) */}
+      {/* CHECKOUT MODAL - Two-Step: Identification → Payment */}
       {isCheckoutOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <motion.div 
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="bg-[#18181b] w-full max-w-md rounded-3xl p-8 border border-white/10"
-          >
-            <h2 className="text-2xl font-black italic mb-6">Identificação</h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-white/40 mb-2">Seu Nome</label>
-                <input 
-                  type="text" 
-                  value={customer.name}
-                  onChange={e => setCustomer({...customer, name: e.target.value})}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold"
-                  placeholder="Ex: João Silva"
-                />
-              </div>
+          {/* Step 1: Customer Identification */}
+          {!customerConfirmed ? (
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-[#18181b] w-full max-w-md rounded-3xl p-8 border border-white/10"
+            >
+              <h2 className="text-2xl font-black italic mb-6">Identificação</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">Seu Nome</label>
+                  <input 
+                    type="text" 
+                    value={customer.name}
+                    onChange={e => setCustomer({...customer, name: e.target.value})}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold"
+                    placeholder="Ex: João Silva"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase text-white/40 mb-2">CPF (Nota Fiscal)</label>
-                <IMaskInput
-                  mask="000.000.000-00"
-                  value={customer.cpf}
-                  unmask={false}
-                  onAccept={(value: string) => setCustomer({ ...customer, cpf: value })}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold placeholder:text-white/20"
-                  placeholder="000.000.000-00"
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">CPF (Nota Fiscal)</label>
+                  <IMaskInput
+                    mask="000.000.000-00"
+                    value={customer.cpf}
+                    unmask={false}
+                    onAccept={(value: string) => setCustomer({ ...customer, cpf: value })}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold placeholder:text-white/20"
+                    placeholder="000.000.000-00"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase text-white/40 mb-2">Mesa (Opcional)</label>
-                <input 
-                  type="text" 
-                  value={customer.table}
-                  onChange={e => setCustomer({...customer, table: e.target.value})}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold"
-                  placeholder="Ex: 05"
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">Telefone</label>
+                  <IMaskInput
+                    mask="(00) 00000-0000"
+                    value={customer.phone || ''}
+                    onAccept={(value: string) => setCustomer({ ...customer, phone: value })}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold placeholder:text-white/20"
+                    placeholder="(00) 00000-0000"
+                  />
+                </div>
 
+                <div>
+                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">Mesa (Opcional)</label>
+                  <input 
+                    type="text" 
+                    value={customer.table}
+                    onChange={e => setCustomer({...customer, table: e.target.value})}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold"
+                    placeholder="Ex: 05"
+                  />
+                </div>
+
+                <button 
+                  onClick={() => {
+                    if (!customer.name || !customer.cpf) {
+                      toast.error("Por favor, preencha nome e CPF");
+                      return;
+                    }
+                    setCustomerConfirmed(true);
+                  }}
+                  className="w-full py-4 bg-primary rounded-xl font-black uppercase tracking-widest mt-6 flex items-center justify-center gap-2"
+                >
+                  Ir para Pagamento <ArrowRight className="w-5 h-5" />
+                </button>
+                 
+                <button 
+                  onClick={() => setIsCheckoutOpen(false)}
+                  className="w-full py-3 text-white/40 font-bold text-xs uppercase hover:text-white"
+                >
+                  Voltar
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            /* Step 2: Payment Selection */
+            <div className="w-full max-w-md relative">
               <button 
-                onClick={handleCheckout}
-                disabled={loading}
-                className="w-full py-4 bg-primary rounded-xl font-black uppercase tracking-widest mt-6 flex items-center justify-center gap-2"
+                onClick={() => setCustomerConfirmed(false)}
+                className="absolute -top-12 left-0 text-white/40 hover:text-white flex items-center gap-2 text-xs font-bold uppercase"
               >
-                {loading ? 'Enviando...' : (
-                  <>Confirmar e Pedir <ArrowRight className="w-5 h-5" /></>
-                )}
+                <ArrowRight className="w-4 h-4 rotate-180" /> Voltar
               </button>
-               
-              <button 
-                onClick={() => setIsCheckoutOpen(false)}
-                className="w-full py-3 text-white/40 font-bold text-xs uppercase hover:text-white"
-              >
-                Voltar
-              </button>
+
+              <CheckoutFlow 
+                order={{
+                  id: `order_${Date.now()}`,
+                  total: cartTotal,
+                  restaurantId: restaurant?.ownerId,
+                  customer: {
+                    name: customer.name,
+                    cpf: customer.cpf,
+                    phone: customer.phone || ''
+                  },
+                  items: cart
+                }}
+                onSuccess={handleCheckoutFinal}
+                onCancel={() => {
+                  setCustomerConfirmed(false);
+                  setIsCheckoutOpen(false);
+                }}
+              />
             </div>
-          </motion.div>
+          )}
         </div>
       )}
 

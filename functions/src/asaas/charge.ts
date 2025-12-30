@@ -31,6 +31,8 @@ interface ChargeRequest {
   restaurantId: string; // UID of restaurant owner
   description?: string;
   dueDate?: string; // YYYY-MM-DD, default: today
+  creditCard?: any;
+  creditCardHolder?: any;
 }
 
 interface SplitRule {
@@ -43,7 +45,10 @@ interface SplitRule {
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════════════════
 
-export const financeCharge = functions.https.onCall(async (data: ChargeRequest, context) => {
+// CORRIGIDO: Assinatura (request)
+export const financeCharge = functions.https.onCall(async (request) => {
+  const data = request.data as ChargeRequest; // Casting explícito
+  
   // Validate input
   if (!data.orderId || !data.amount || !data.restaurantId) {
     throw new functions.https.HttpsError(
@@ -58,6 +63,11 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
       'Valor mínimo para cobrança é R$ 5,00'
     );
   }
+
+  // AI FRAUD GUARD (Simulado)
+  let fraudScore = 0;
+  if (data.amount > 500) fraudScore += 30;
+  if (!data.customerData.cpfCnpj) fraudScore += 50;
 
   try {
     // Get restaurant data
@@ -85,7 +95,6 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
     // AI FRAUD GUARD - Risk Assessment
     // ════════════════════════════════════════════════════════════════
     let riskLevel: 'low' | 'medium' | 'high' = 'low';
-    let fraudScore = 0;
     
     // Risk factor: High value orders
     if (data.amount > 300) {
@@ -96,9 +105,6 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
       fraudScore += 40;
       riskLevel = 'high';
     }
-    
-    // Risk factor: First order (could add check for new customer)
-    // In production, you'd check customer history here
     
     console.log(`[FRAUD GUARD] Order ${data.orderId}: Score ${fraudScore}, Risk: ${riskLevel}`);
     
@@ -135,6 +141,10 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
       ...(data.billingType === 'PIX' && {
         postalService: false,
       }),
+      
+      // Credit card data
+      creditCard: data.creditCard,
+      creditCardHolderInfo: data.creditCardHolder
     };
 
     // Create payment in Asaas
@@ -166,24 +176,15 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
     }
 
     // Update order with payment info
-    const ordersQuery = await db.collection('orders')
-      .where('__name__', '==', data.orderId)
-      .limit(1)
-      .get();
-
-    if (!ordersQuery.empty) {
-      await ordersQuery.docs[0].ref.update({
-        paymentId: payment.id,
-        paymentStatus: 'pending',
-        paymentMethod: data.billingType.toLowerCase(),
-        paymentUrl: payment.invoiceUrl,
-        emprataFee: emprataFee,
-        restaurantAmount: restaurantAmount,
-        fraudScore: fraudScore,
-        riskLevel: riskLevel,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-    }
+    await db.collection('orders').doc(data.orderId).update({
+      paymentId: payment.id,
+      paymentStatus: 'pending',
+      paymentMethod: data.billingType.toLowerCase(),
+      paymentUrl: payment.invoiceUrl,
+      emprataFee: emprataFee,
+      restaurantAmount: restaurantAmount,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
     console.log(`[CHARGE] Payment created: ${payment.id}`);
 
@@ -197,7 +198,7 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
       bankSlipUrl: payment.bankSlipUrl,
       // Pix specific
       pixCopyPaste: pixData?.payload,
-      pixQrCode: pixData?.encodedImage, // Base64
+      pixQrCodeImage: pixData?.encodedImage, // Base64
       // Fee breakdown
       fees: {
         total: data.amount,
@@ -207,7 +208,7 @@ export const financeCharge = functions.https.onCall(async (data: ChargeRequest, 
       },
       // Fraud Guard
       riskLevel,
-      fraudScore,
+      fraudScore
     };
 
   } catch (error: any) {

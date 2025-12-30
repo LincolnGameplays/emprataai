@@ -28,7 +28,7 @@ interface OnboardRequest {
   addressNumber: string;
   province: string; // Bairro
   city: string;
-  state: string;
+  state: string; // UF
   companyType?: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION';
 }
 
@@ -36,13 +36,16 @@ interface OnboardRequest {
 // MAIN FUNCTION
 // ══════════════════════════════════════════════════════════════════
 
-export const financeOnboard = functions.https.onCall(async (data: OnboardRequest, context) => {
-  // Auth check
-  if (!context.auth) {
+// CORRIGIDO: Assinatura (request)
+export const financeOnboard = functions.https.onCall(async (request) => {
+  const data = request.data as OnboardRequest;
+  const auth = request.auth;
+
+  if (!auth) {
     throw new functions.https.HttpsError('unauthenticated', 'User must be logged in');
   }
 
-  const uid = context.auth.uid;
+  const uid = auth.uid;
   
   // Validate required fields
   const required = ['name', 'email', 'cpfCnpj', 'phone', 'postalCode', 'address', 'addressNumber', 'city', 'state'];
@@ -65,13 +68,14 @@ export const financeOnboard = functions.https.onCall(async (data: OnboardRequest
   }
 
   try {
-    // Create Asaas subaccount
+    // 1. Cria a subconta no Asaas
     const response = await axios.post(
       `${ASAAS_CONFIG.baseUrl}/accounts`,
       {
         name: data.name,
         email: data.email,
-        cpfCnpj: data.cpfCnpj.replace(/\D/g, ''), // Remove formatting
+        loginEmail: data.email,
+        cpfCnpj: data.cpfCnpj.replace(/\D/g, ''),
         phone: data.phone.replace(/\D/g, ''),
         mobilePhone: data.phone.replace(/\D/g, ''),
         postalCode: data.postalCode.replace(/\D/g, ''),
@@ -81,8 +85,7 @@ export const financeOnboard = functions.https.onCall(async (data: OnboardRequest
         city: data.city,
         state: data.state,
         companyType: data.companyType || 'MEI',
-        // Split config - we're the main account
-        loginEmail: data.email,
+        country: 'BR'
       },
       {
         headers: {
@@ -93,12 +96,14 @@ export const financeOnboard = functions.https.onCall(async (data: OnboardRequest
     );
 
     const asaasAccount = response.data;
-    
-    // Save to Firestore
+
+    // 2. Salva o ID da carteira (walletId) no Firestore do usuário
+    const walletId = asaasAccount.walletId || asaasAccount.id;
+
     await db.collection('users').doc(uid).set({
       finance: {
         asaasAccountId: asaasAccount.id,
-        asaasWalletId: asaasAccount.walletId || asaasAccount.id,
+        asaasWalletId: walletId,
         asaasApiKey: asaasAccount.apiKey, // Their individual key
         onboardedAt: admin.firestore.FieldValue.serverTimestamp(),
         status: 'active',
@@ -110,8 +115,8 @@ export const financeOnboard = functions.https.onCall(async (data: OnboardRequest
     return {
       success: true,
       accountId: asaasAccount.id,
-      walletId: asaasAccount.walletId,
-      message: 'Conta ativada com sucesso!'
+      walletId: walletId,
+      message: 'Conta Asaas criada com sucesso'
     };
 
   } catch (error: any) {
@@ -119,7 +124,7 @@ export const financeOnboard = functions.https.onCall(async (data: OnboardRequest
 
     const errorMessage = error.response?.data?.errors?.[0]?.description 
       || error.message 
-      || 'Erro ao criar conta';
+      || 'Falha ao criar conta financeira';
 
     throw new functions.https.HttpsError('internal', errorMessage);
   }
