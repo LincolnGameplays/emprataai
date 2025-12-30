@@ -1,49 +1,82 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // ============================================
-    // 1. USERS COLLECTION (Mantenha a segurança atual)
-    // ============================================
+    // ============================================================
+    // REGRAS PARA USUÁRIOS - BLINDAGEM FINANCEIRA
+    // ============================================================
     match /users/{userId} {
+      // O usuário pode ler o próprio perfil
       allow read: if request.auth != null && request.auth.uid == userId;
-      allow create: if request.auth != null && request.auth.uid == userId;
       
-      // Bloqueia edição de campos sensíveis (créditos/plano) pelo front-end
+      // O usuário pode atualizar dados cadastrais (nome, foto), 
+      // MAS NÃO PODE MEXER NO SALDO (wallet), SUBSCRIPTION nem FINANCE.
+      // Somente Cloud Functions (Admin SDK) pode alterar esses campos.
       allow update: if request.auth != null 
                     && request.auth.uid == userId
-                    && !request.resource.data.diff(resource.data)
-                       .affectedKeys()
-                       .hasAny(['credits', 'plan', 'subscriptionRenewsAt']);
+                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['wallet', 'subscription', 'finance']);
+      
+      // Criar perfil inicial (apenas via Auth ou Cloud Function)
+      allow create: if request.auth != null && request.auth.uid == userId;
     }
 
-    // ============================================
-    // 2. MENUS COLLECTION (Cardápio Digital)
-    // ============================================
+    // ============================================================
+    // EXTRATO FINANCEIRO - READ-ONLY PARA FRONTEND
+    // ============================================================
+    match /users/{userId}/finance_statement/{document=**} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false; // Bloqueado total para frontend
+    }
+    
+    // Notificações - Usuário pode ler e marcar como lida
+    match /users/{userId}/notifications/{notifId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null 
+                    && request.auth.uid == userId
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow write: if false;
+    }
+    
+    // Logs de segurança - Somente leitura
+    match /users/{userId}/security_logs/{logId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if false;
+    }
+
+    // ============================================================
+    // PEDIDOS (ORDERS)
+    // ============================================================
+    match /orders/{orderId} {
+      // Restaurante dono pode ler/atualizar
+      allow read: if request.auth != null 
+                  && (resource.data.restaurantId == request.auth.uid 
+                      || resource.data.customerId == request.auth.uid);
+      
+      // Criar pedido - qualquer autenticado
+      allow create: if request.auth != null;
+      
+      // Atualizar status - apenas restaurante dono
+      allow update: if request.auth != null 
+                    && resource.data.restaurantId == request.auth.uid;
+    }
+
+    // ============================================================
+    // MENU / CARDÁPIO
+    // ============================================================
     match /menus/{menuId} {
-      // PÚBLICO: Qualquer pessoa (mesmo sem login) pode ver o cardápio
+      // Público pode ler (para QR Code)
       allow read: if true;
       
-      // CRIAÇÃO: Só usuário logado pode criar, e deve ser dono do menu
-      allow create: if request.auth != null && request.resource.data.ownerId == request.auth.uid;
-      
-      // EDIÇÃO: Apenas o dono pode editar ou deletar
-      allow update, delete: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      // Apenas dono pode escrever
+      allow write: if request.auth != null && resource.data.ownerId == request.auth.uid;
+      allow create: if request.auth != null;
     }
 
-    // ============================================
-    // 3. ORDERS COLLECTION (Pedidos do Cardápio)
-    // ============================================
-    match /orders/{orderId} {
-      // CRIAÇÃO: Qualquer cliente (público) pode enviar um pedido
-      allow create: if true; 
-      
-      // LEITURA: Apenas o dono do restaurante vê os pedidos dele (Dashboard)
-      allow read: if request.auth != null && resource.data.ownerId == request.auth.uid;
-      
-      // EDIÇÃO: Apenas o dono pode mudar status (ex: 'pending' -> 'paid')
-      allow update: if request.auth != null && resource.data.ownerId == request.auth.uid;
+    // ============================================================
+    // REGRA PADRÃO - BLOQUEIO TOTAL
+    // ============================================================
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

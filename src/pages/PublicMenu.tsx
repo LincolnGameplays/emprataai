@@ -243,8 +243,10 @@ export default function PublicMenu() {
         // Payment data from CheckoutFlow
         paymentMethod: paymentData.paymentMethod,
         paymentStatus: paymentData.paymentStatus || 'pending',
-        changeFor: paymentData.changeFor,
-        paymentId: paymentData.paymentId,
+        
+        // CORREÇÃO: Se for undefined, envia null (Firestore não aceita undefined)
+        changeFor: paymentData.changeFor ?? null, 
+        paymentId: paymentData.paymentId ?? null, 
         
         status: 'pending',
         createdAt: serverTimestamp(),

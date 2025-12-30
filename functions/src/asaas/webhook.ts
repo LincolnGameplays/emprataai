@@ -1,7 +1,6 @@
-// ✅ IMPORTAÇÃO V2
 import {onRequest} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
-import {ASAAS_CONFIG} from "./constants";
+import {ASAAS_CONFIG, calculateEmprataFee} from "./constants";
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -10,113 +9,143 @@ export const financeWebhook = onRequest(async (req, res) => {
   const token = req.headers["asaas-access-token"];
 
   if (token !== ASAAS_CONFIG.webhookToken) {
-    console.error("[WEBHOOK] Token inválido:", token);
     res.status(401).send("Unauthorized");
     return;
   }
 
   const event = req.body;
-  console.log("[WEBHOOK] Evento recebido:", event.event, event.payment?.id);
 
   try {
-    switch (event.event) {
-    case "PAYMENT_RECEIVED":
-    case "PAYMENT_CONFIRMED":
-      await handlePaymentReceived(event.payment);
-      break;
-
-    case "PAYMENT_REFUNDED":
-      await handlePaymentRefunded(event.payment);
-      break;
-
-    case "TRANSFER_RECEIVED":
-      await handleTransferReceived(event.transfer);
-      break;
-
-    default:
-      console.log("[WEBHOOK] Evento ignorado:", event.event);
+    if (event.event === "PAYMENT_RECEIVED" || event.event === "PAYMENT_CONFIRMED") {
+      await handlePaymentCredit(event.payment);
     }
-
     res.status(200).send({received: true});
   } catch (error) {
     console.error("[WEBHOOK ERROR]", error);
-    res.status(500).send("Internal Error");
+    res.status(200).send({error: "Internal logic error"});
   }
 });
 
-/**
- * Processa pagamento recebido e atualiza pedidos/assinaturas.
- * @param {object} payment - Objeto de pagamento do Asaas.
- * @return {Promise<void>} Promise vazia.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handlePaymentReceived(payment: any): Promise<void> {
+async function handlePaymentCredit(payment: any) {
   const externalRef = payment.externalReference;
-  if (!externalRef) return;
+  if (!externalRef || externalRef.startsWith("SUB_")) return;
 
-  // Se for ORDER (Pedido Marketplace)
-  if (!externalRef.startsWith("SUB_")) {
-    const orderRef = db.collection("orders").doc(externalRef);
-    const orderDoc = await orderRef.get();
+  const orderId = externalRef;
+  const orderRef = db.collection("orders").doc(orderId);
+  const orderDoc = await orderRef.get();
 
-    if (orderDoc.exists) {
-      await orderRef.update({
-        status: "PAID",
-        paymentStatus: "APPROVED",
-        paidAt: admin.firestore.FieldValue.serverTimestamp(),
-        paymentId: payment.id,
-      });
-      console.log(`[WEBHOOK] Pedido ${externalRef} pago.`);
+  if (!orderDoc.exists) return;
+  const orderData = orderDoc.data();
 
-      // ✅ NOVO: Notificação em Tempo Real para o Restaurante
-      const restaurantId = orderDoc.data()?.restaurantId;
-      if (restaurantId) {
-        await db.collection("users").doc(restaurantId).collection("notifications").add({
-          type: "SALE_APPROVED",
-          amount: payment.value,
-          orderId: externalRef,
-          date: admin.firestore.FieldValue.serverTimestamp(),
-          read: false,
-        });
-        console.log(`[WEBHOOK] Notificação enviada para restaurante ${restaurantId}`);
+  if (orderData?.paymentStatus === "CREDITED") return;
+
+  const restaurantId = orderData?.restaurantId;
+  if (!restaurantId) return;
+
+  // 1. Cálculos Financeiros
+  const grossAmount = payment.value;
+  const userRef = db.collection("users").doc(restaurantId);
+  const userDoc = await userRef.get();
+  const userData = userDoc.data();
+  const plan = userData?.plan || "free";
+
+  // Calcula taxa Emprata
+  const {restaurantAmount, emprataFee} = calculateEmprataFee(grossAmount, plan);
+
+  // 2. PROFIT-FIRST: Calcula custo dos insumos
+  let totalCost = 0;
+  const items = orderData?.items || [];
+  const menuRef = db.collection("users").doc(restaurantId).collection("menu");
+
+  for (const item of items) {
+    if (item.productId) {
+      const productDoc = await menuRef.doc(item.productId).get();
+      if (productDoc.exists) {
+        const productData = productDoc.data();
+        const costPrice = productData?.costPrice || 0;
+        totalCost += costPrice * (item.quantity || 1);
       }
     }
-  } else {
-    // Se for ASSINATURA (SUB_)
-    const userId = externalRef.replace("SUB_", "");
-    console.log(`[WEBHOOK] Assinatura do usuário ${userId} paga.`);
-
-    // Atualiza status da assinatura no Firestore
-    await db.collection("users").doc(userId).update({
-      "subscription.status": "active",
-      "subscription.lastPayment": admin.firestore.FieldValue.serverTimestamp(),
-    });
   }
-}
 
-/**
- * Processa reembolso de pagamento.
- * @param {object} payment - Objeto de pagamento do Asaas.
- * @return {Promise<void>} Promise vazia.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handlePaymentRefunded(payment: any): Promise<void> {
-  const externalRef = payment.externalReference;
-  if (externalRef && !externalRef.startsWith("SUB_")) {
-    await db.collection("orders").doc(externalRef).update({
-      status: "REFUNDED",
-      paymentStatus: "REFUNDED",
+  // Custo de entrega (se aplicável)
+  const deliveryCost = orderData?.deliveryFee || 0;
+
+  // Lucro Líquido Real
+  const netProfit = restaurantAmount - totalCost - deliveryCost;
+  const profitMargin = restaurantAmount > 0 ? (netProfit / restaurantAmount) * 100 : 0;
+
+  // 3. ATUALIZA SALDO VIRTUAL NO FIRESTORE
+  await db.runTransaction(async (transaction) => {
+    const freshUser = await transaction.get(userRef);
+    const currentBalance = freshUser.data()?.wallet?.balance || 0;
+    const newBalance = parseFloat((currentBalance + restaurantAmount).toFixed(2));
+
+    // Atualiza saldo
+    transaction.update(userRef, {
+      "wallet.balance": newBalance,
+      "wallet.lastTransaction": admin.firestore.FieldValue.serverTimestamp(),
     });
-  }
-}
 
-/**
- * Processa transferência recebida via Pix.
- * @param {object} transfer - Objeto de transferência do Asaas.
- * @return {Promise<void>} Promise vazia.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleTransferReceived(transfer: any): Promise<void> {
-  console.log("[WEBHOOK] Transferência recebida:", transfer?.id, transfer?.value);
-  // Implementar lógica se necessário para rastrear transferências diretas
+    // Marca pedido como Pago
+    transaction.update(orderRef, {
+      status: "PAID",
+      paymentStatus: "CREDITED",
+      paidAt: admin.firestore.FieldValue.serverTimestamp(),
+      paymentId: payment.id,
+      financials: {
+        grossAmount,
+        emprataFee,
+        restaurantAmount,
+        costOfGoods: totalCost,
+        deliveryCost,
+        netProfit: parseFloat(netProfit.toFixed(2)),
+        profitMargin: parseFloat(profitMargin.toFixed(1)),
+      },
+    });
+
+    // Extrato com dados de lucro
+    const statementRef = userRef.collection("finance_statement").doc();
+    transaction.set(statementRef, {
+      type: "SALE",
+      amount: restaurantAmount,
+      grossAmount: grossAmount,
+      orderId: orderId,
+      description: `Venda Pedido #${orderId.slice(0, 5)}`,
+      // PROFIT-FIRST DATA
+      costOfGoods: totalCost,
+      emprataFee: emprataFee,
+      deliveryCost: deliveryCost,
+      netProfit: parseFloat(netProfit.toFixed(2)),
+      profitMargin: parseFloat(profitMargin.toFixed(1)),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Atualiza totais acumulados do dia
+    const today = new Date().toISOString().split("T")[0];
+    const dailyStatsRef = userRef.collection("daily_stats").doc(today);
+    transaction.set(dailyStatsRef, {
+      date: today,
+      totalSales: admin.firestore.FieldValue.increment(grossAmount),
+      totalRevenue: admin.firestore.FieldValue.increment(restaurantAmount),
+      totalCosts: admin.firestore.FieldValue.increment(totalCost),
+      totalProfit: admin.firestore.FieldValue.increment(netProfit),
+      ordersCount: admin.firestore.FieldValue.increment(1),
+    }, {merge: true});
+
+    // Notificação
+    const notifRef = userRef.collection("notifications").doc();
+    transaction.set(notifRef, {
+      type: "SALE_CREDITED",
+      title: "Venda Aprovada",
+      body: `+ R$ ${restaurantAmount.toFixed(2)} | Lucro: R$ ${netProfit.toFixed(2)} (${profitMargin.toFixed(0)}%)`,
+      date: admin.firestore.FieldValue.serverTimestamp(),
+      read: false,
+    });
+  });
+
+  console.log(
+    `[WALLET CREDIT] Restaurante ${restaurantId} | ` +
+    `Venda: R$ ${grossAmount} | Lucro: R$ ${netProfit.toFixed(2)} (${profitMargin.toFixed(0)}%)`
+  );
 }

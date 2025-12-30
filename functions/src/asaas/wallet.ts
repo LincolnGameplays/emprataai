@@ -2,28 +2,31 @@ import {onCall, HttpsError} from "firebase-functions/v2/https";
 import * as admin from "firebase-admin";
 import axios from "axios";
 import {ASAAS_CONFIG} from "./constants";
-import {hasPendingTransaction} from "./security";
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-// Taxa de transferência Pix do Asaas
-const TRANSFER_FEE = 5.00;
+// Taxa fixa de saque (Cobre o custo do Pix Asaas + seu lucro)
+const WITHDRAW_FEE = 5.00;
 
-// === APRIMORAMENTO: Dashboard Financeiro Completo ===
+// ==================================================================
+// 1. VER SALDO (Leitura Segura)
+// ==================================================================
 export const financeGetBalance = onCall(async (request) => {
+  // SEGURANÇA 1: Requer autenticação
   const auth = request.auth;
   if (!auth) throw new HttpsError("unauthenticated", "Login necessário");
 
   try {
+    // SEGURANÇA 2: Busca dados APENAS do ID logado (auth.uid)
+    // Impossível ler saldo de outro usuário
     const userDoc = await db.collection("users").doc(auth.uid).get();
     const userData = userDoc.data();
 
-    // Prioriza chave própria, senão usa a mestra (fallback para subcontas)
-    const apiKey = userData?.finance?.asaasApiKey || ASAAS_CONFIG.apiKey;
-    const headers = {access_token: apiKey};
+    const available = userData?.wallet?.balance || 0;
+    const pixKey = userData?.finance?.withdrawTarget?.pixKey;
 
-    // Verifica se tem trava de segurança ativa
+    // Verifica trava de segurança (Troca de chave recente)
     const securityLock = userData?.finance?.securityLockUntil;
     let isLocked = false;
     let hoursUntilUnlock = 0;
@@ -37,196 +40,148 @@ export const financeGetBalance = onCall(async (request) => {
       }
     }
 
-    // 1. Busca Saldo Disponível (Líquido)
-    const balanceReq = axios.get(`${ASAAS_CONFIG.baseUrl}/finance/balance`, {headers});
-
-    // 2. Busca estatísticas de pagamentos para calcular "A Receber"
-    const statsReq = axios.get(`${ASAAS_CONFIG.baseUrl}/finance/payment/statistics`, {
-      headers,
-      params: {status: "CONFIRMED", billingType: "CREDIT_CARD"},
-    }).catch(() => ({data: {netValue: 0}})); // Fallback se endpoint não existir
-
-    const [balanceRes, statsRes] = await Promise.all([balanceReq, statsReq]);
-
     return {
-      available: balanceRes.data.balance, // Pode sacar AGORA
-      toReceive: statsRes.data.netValue || 0, // Vendas no crédito aguardando liberação
-      pending: 0,
-      withdrawFee: TRANSFER_FEE,
-      hasWithdrawAccount: !!userData?.finance?.withdrawTarget,
-
-      // Info de Segurança
+      available,
+      withdrawFee: WITHDRAW_FEE,
+      hasWithdrawAccount: !!pixKey,
+      pixKey: pixKey || null,
       isLocked,
       hoursUntilUnlock,
     };
-  } catch (error: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const err = error as any;
-    console.error("[BALANCE ERROR]", err.response?.data || err);
-    return {available: 0, toReceive: 0, pending: 0, withdrawFee: TRANSFER_FEE, error: "Erro ao carregar saldo"};
+  } catch (error) {
+    console.error(error);
+    throw new HttpsError("internal", "Erro ao buscar saldo.");
   }
 });
 
-/**
- * Busca o extrato financeiro detalhado do Asaas.
- */
+// ==================================================================
+// 2. REALIZAR SAQUE (Transação Blindada)
+// ==================================================================
+export const financeWithdraw = onCall(async (request) => {
+  const data = request.data as { amount: number };
+  const auth = request.auth;
+
+  // SEGURANÇA 1: Autenticação
+  if (!auth) throw new HttpsError("unauthenticated", "Login necessário");
+
+  // SEGURANÇA 2: Referência forçada ao próprio usuário
+  const userRef = db.collection("users").doc(auth.uid);
+
+  // SEGURANÇA 3: Atomicidade (Transação do Banco de Dados)
+  // Nada entra ou sai enquanto isso roda. Evita "duplo clique".
+  await db.runTransaction(async (transaction) => {
+    const userDoc = await transaction.get(userRef);
+    const userData = userDoc.data();
+
+    if (!userData) throw new HttpsError("not-found", "Usuário inválido");
+
+    const currentBalance = userData.wallet?.balance || 0;
+    const withdrawTarget = userData.finance?.withdrawTarget;
+
+    // Validação: Tem chave Pix?
+    if (!withdrawTarget?.pixKey) {
+      throw new HttpsError("failed-precondition", "Chave Pix não configurada.");
+    }
+
+    // Validação: Trava de 24h ativa?
+    if (userData.finance?.securityLockUntil) {
+      const lockDate = userData.finance.securityLockUntil.toDate();
+      if (new Date() < lockDate) {
+        throw new HttpsError(
+          "permission-denied",
+          "Saque bloqueado por segurança (Alteração recente de chave)."
+        );
+      }
+    }
+
+    // Validação: Tem saldo suficiente?
+    const totalDebit = data.amount + WITHDRAW_FEE;
+    if (currentBalance < totalDebit) {
+      throw new HttpsError(
+        "failed-precondition",
+        `Saldo insuficiente. Necessário: R$ ${totalDebit.toFixed(2)}`
+      );
+    }
+
+    // === AÇÃO DE RISCO: Transferir Dinheiro Real ===
+    // Usamos a chave Mestra da Plataforma para enviar o Pix
+    let transferId;
+    try {
+      const transferPayload = {
+        value: data.amount, // Valor líquido para o cliente
+        operationType: "PIX",
+        pixAddressKey: withdrawTarget.pixKey,
+        pixAddressKeyType: withdrawTarget.pixKeyType,
+        description: "Saque Plataforma",
+      };
+
+      const response = await axios.post(
+        `${ASAAS_CONFIG.baseUrl}/transfers`,
+        transferPayload,
+        {headers: {access_token: ASAAS_CONFIG.apiKey}} // <--- Chave Mestra
+      );
+      transferId = response.data.id;
+    } catch (apiError: any) {
+      console.error("Erro Asaas:", apiError.response?.data);
+      const msg = apiError.response?.data?.errors?.[0]?.description || "Erro na transferência bancária.";
+      throw new HttpsError("internal", msg);
+    }
+
+    // === ATUALIZAÇÃO SEGURA DO SALDO ===
+    // Se chegou aqui, o dinheiro saiu da conta. Precisamos descontar agora.
+    const newBalance = parseFloat((currentBalance - totalDebit).toFixed(2));
+
+    transaction.update(userRef, {
+      "wallet.balance": newBalance,
+      "wallet.lastWithdraw": admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    // Cria registro imutável no extrato
+    const statementRef = userRef.collection("finance_statement").doc();
+    transaction.set(statementRef, {
+      type: "WITHDRAW",
+      amount: totalDebit, // Valor total debitado (Saque + Taxa)
+      netValue: data.amount,
+      fee: WITHDRAW_FEE,
+      target: withdrawTarget.pixKey,
+      asaasTransferId: transferId,
+      description: "Saque Pix Realizado",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  });
+
+  return {success: true, message: "Saque realizado com sucesso!"};
+});
+
+// ==================================================================
+// 3. EXTRATO (Leitura Segura)
+// ==================================================================
 export const financeGetStatement = onCall(async (request) => {
   const auth = request.auth;
   if (!auth) throw new HttpsError("unauthenticated", "Login necessário");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const {limit = 10, offset = 0} = request.data as any;
-
   try {
-    const userDoc = await db.collection("users").doc(auth.uid).get();
-    const apiKey = userDoc.data()?.finance?.asaasApiKey;
+    const snapshot = await db
+      .collection("users")
+      .doc(auth.uid)
+      .collection("finance_statement")
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
 
-    if (!apiKey) throw new HttpsError("failed-precondition", "Conta não vinculada.");
+    const data = snapshot.docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        type: d.type,
+        value: d.amount,
+        description: d.description,
+        date: d.createdAt?.toDate()?.toLocaleDateString("pt-BR") || "",
+      };
+    });
 
-    const response = await axios.get(
-      `${ASAAS_CONFIG.baseUrl}/financialTransactions`,
-      {headers: {access_token: apiKey}, params: {limit, offset}}
-    );
-
-    return {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      data: response.data.data.map((item: any) => ({
-        id: item.id,
-        value: item.value,
-        balance: item.balance,
-        type: item.type,
-        date: item.date,
-        description: item.description,
-      })),
-      hasMore: response.data.hasMore,
-    };
-  } catch (error: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const err = error as any;
-    console.error("[STATEMENT ERROR]", err);
+    return {data};
+  } catch (error) {
     throw new HttpsError("internal", "Erro ao buscar extrato.");
-  }
-});
-
-interface WithdrawRequest {
-  amount: number;
-}
-
-/**
- * Realiza um saque via Pix para a conta bancária cadastrada.
- * Inclui verificação de trava de segurança de 24h.
- */
-export const financeWithdraw = onCall(async (request) => {
-  const data = request.data as WithdrawRequest;
-  const auth = request.auth;
-
-  if (!auth) throw new HttpsError("unauthenticated", "Login necessário");
-
-  // === ANTI-DUPLICATE: Verifica se há saque pendente nos últimos 30s ===
-  const hasPending = await hasPendingTransaction(auth.uid, "WITHDRAW", 30000);
-  if (hasPending) {
-    throw new HttpsError(
-      "already-exists",
-      "Você já tem um saque em processamento. Aguarde antes de tentar novamente."
-    );
-  }
-
-  try {
-    const userRef = db.collection("users").doc(auth.uid);
-    const userDoc = await userRef.get();
-    const userData = userDoc.data();
-
-    const apiKey = userData?.finance?.asaasApiKey;
-    const withdrawTarget = userData?.finance?.withdrawTarget;
-
-    // === TRAVA DE SEGURANÇA 24H ===
-    const securityLock = userData?.finance?.securityLockUntil;
-
-    if (securityLock) {
-      const lockDate = securityLock.toDate();
-      const now = new Date();
-
-      if (now < lockDate) {
-        const hoursLeft = Math.ceil((lockDate.getTime() - now.getTime()) / (1000 * 60 * 60));
-        throw new HttpsError(
-          "permission-denied",
-          `Saque bloqueado por segurança (Alteração de Chave Pix). Tente em ${hoursLeft} horas.`
-        );
-      }
-    }
-    // ==============================
-
-    // Validações
-    if (!apiKey) {
-      throw new HttpsError("failed-precondition", "Conta financeira não ativa.");
-    }
-    if (!withdrawTarget || !withdrawTarget.pixKey) {
-      throw new HttpsError("failed-precondition", "Configure sua conta de recebimento antes de sacar.");
-    }
-
-    // Verifica Saldo em tempo real
-    const balanceRes = await axios.get(
-      `${ASAAS_CONFIG.baseUrl}/finance/balance`,
-      {headers: {access_token: apiKey}}
-    );
-    const available = balanceRes.data.balance;
-
-    if (available < (data.amount + TRANSFER_FEE)) {
-      throw new HttpsError(
-        "failed-precondition",
-        `Saldo insuficiente. Taxa de saque: R$ ${TRANSFER_FEE.toFixed(2)}`
-      );
-    }
-
-    // Executa a Transferência Pix Externa
-    const transferPayload = {
-      value: data.amount,
-      operationType: "PIX",
-      pixAddressKey: withdrawTarget.pixKey,
-      pixAddressKeyType: withdrawTarget.pixKeyType,
-      description: "Saque EmprataAI",
-    };
-
-    const response = await axios.post(
-      `${ASAAS_CONFIG.baseUrl}/transfers`,
-      transferPayload,
-      {headers: {access_token: apiKey}}
-    );
-
-    // Registra no Histórico
-    await userRef.collection("transactions").add({
-      type: "withdraw_out",
-      amount: data.amount,
-      fee: TRANSFER_FEE,
-      target: withdrawTarget.pixKey,
-      status: "processing",
-      asaasId: response.data.id,
-      date: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // === NOTIFICAÇÃO DE SEGURANÇA ===
-    const maskedKey = "***" + withdrawTarget.pixKey.slice(-4);
-    await userRef.collection("notifications").add({
-      type: "WITHDRAW_REQUESTED",
-      title: "Saque Realizado",
-      body: `Saque de R$ ${data.amount.toFixed(2)} enviado para Pix ${maskedKey}.`,
-      amount: data.amount,
-      date: admin.firestore.FieldValue.serverTimestamp(),
-      read: false,
-    });
-    // ================================
-
-    return {
-      success: true,
-      transferId: response.data.id,
-      message: `Saque de R$ ${data.amount.toFixed(2)} solicitado!`,
-      fee: TRANSFER_FEE,
-    };
-  } catch (error: unknown) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const err = error as any;
-    console.error("[WITHDRAW ERROR]", err.response?.data || err);
-    const msg = err.response?.data?.errors?.[0]?.description || err.message || "Erro ao processar saque.";
-    throw new HttpsError("internal", msg);
   }
 });

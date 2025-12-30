@@ -692,9 +692,9 @@ export default function MenuBuilder() {
                                 )}
                               </button>
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 flex-wrap">
                               <div className="flex items-center gap-1">
-                                <span className="text-white/40 text-xs">R$</span>
+                                <span className="text-white/40 text-xs">Venda R$</span>
                                 <input 
                                   type="number"
                                   step="0.01"
@@ -704,6 +704,26 @@ export default function MenuBuilder() {
                                   placeholder="0,00"
                                 />
                               </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-red-400/60 text-xs">Custo R$</span>
+                                <input 
+                                  type="number"
+                                  step="0.01"
+                                  value={(item as any).costPrice || ''}
+                                  onChange={(e) => updateItem(cat.id, item.id, { costPrice: parseFloat(e.target.value) || 0 } as any)}
+                                  className="w-20 bg-red-500/10 border border-red-500/20 rounded-lg px-2 py-1 text-xs text-red-300 focus:outline-none"
+                                  placeholder="0,00"
+                                />
+                              </div>
+                              {item.price > 0 && (item as any).costPrice > 0 && (
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${
+                                  ((item.price - (item as any).costPrice) / item.price) * 100 >= 30
+                                    ? 'bg-green-500/20 text-green-400'
+                                    : 'bg-yellow-500/20 text-yellow-400'
+                                }`}>
+                                  {(((item.price - (item as any).costPrice) / item.price) * 100).toFixed(0)}% margem
+                                </span>
+                              )}
                               <label className="flex items-center gap-2 cursor-pointer">
                                 <input 
                                   type="checkbox"

@@ -1,401 +1,314 @@
-import React, { useState, useEffect } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../config/firebase';
-import { useAuth } from '../../hooks/useAuth';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Building2, Wallet, ArrowUpRight, History, 
-  AlertTriangle, Lock, CalendarClock, Settings, Loader2
+  Wallet, FileText, Loader2, 
+  AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../config/firebase';
+import { IMaskInput } from 'react-imask';
+
+// Formatação de moeda
+const formatCurrency = (value: number) => {
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(value);
+};
 
 export default function FinanceDashboard() {
-  const { user } = useAuth();
-  
-  // Estados de Dados
   const [loading, setLoading] = useState(true);
-  const [financialData, setFinancialData] = useState({
-    available: 0,
-    toReceive: 0,
-    pending: 0
-  });
-  
-  // Estados de UI
-  const [activeTab, setActiveTab] = useState<'overview' | 'settings'>('overview');
-  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [withdrawLoading, setWithdrawLoading] = useState(false);
-  const [saveLoading, setSaveLoading] = useState(false);
-  
-  // Estados de Configuração Bancária
-  const [pixKey, setPixKey] = useState('');
-  const [pixKeyType, setPixKeyType] = useState('CPF');
-  const [isLocked, setIsLocked] = useState(false);
-  const [hoursUntilUnlock, setHoursUntilUnlock] = useState(0);
+  const [activeTab, setActiveTab] = useState<'wallet' | 'extract'>('wallet');
 
-  // 1. Busca Saldo Inteligente (Enterprise)
-  const fetchBalance = async () => {
-    try {
-      const getBalance = httpsCallable(functions, 'financeGetBalance');
-      const result: any = await getBalance();
-      
-      setFinancialData({
-        available: result.data.available || result.data.balance || 0,
-        toReceive: result.data.toReceive || 0,
-        pending: result.data.pending || 0
-      });
+  // Loading fake inicial
+  useEffect(() => { setTimeout(() => setLoading(false), 500); }, []);
 
-      // Verifica trava de segurança
-      if (result.data.isLocked) {
-        setIsLocked(true);
-        setHoursUntilUnlock(result.data.hoursUntilUnlock || 0);
-      }
-
-      // Busca conta de saque salva
-      const getAccount = httpsCallable(functions, 'getWithdrawAccount');
-      const accResult: any = await getAccount();
-      if (accResult.data.exists) {
-        setPixKey(accResult.data.data.pixKey || '');
-        setPixKeyType(accResult.data.data.pixKeyType || 'CPF');
-      }
-      if (accResult.data.isLocked) {
-        setIsLocked(true);
-        setHoursUntilUnlock(accResult.data.hoursUntilUnlock || 0);
-      }
-
-    } catch (error) {
-      console.error("Erro ao buscar saldo:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchBalance();
-  }, [user]);
-
-  // 2. Função de Saque
-  const handleWithdraw = async () => {
-    if (!withdrawAmount) return;
-    const amount = parseFloat(withdrawAmount.replace(',', '.'));
-    
-    if (amount > financialData.available) {
-      toast.error('Saldo insuficiente.');
-      return;
-    }
-
-    setWithdrawLoading(true);
-    try {
-      const withdraw = httpsCallable(functions, 'financeWithdraw');
-      const res: any = await withdraw({ amount });
-      
-      toast.success(res.data.message || 'Saque solicitado com sucesso!');
-      setWithdrawModalOpen(false);
-      setWithdrawAmount('');
-      fetchBalance();
-    } catch (error: any) {
-      console.error(error);
-      const msg = error.message || 'Erro ao processar saque';
-      
-      if (msg.includes('bloqueado') || msg.includes('Bloqueado')) {
-         toast.error('Saque bloqueado por segurança (Troca de Chave Recente).');
-      } else {
-         toast.error(msg);
-      }
-    } finally {
-      setWithdrawLoading(false);
-    }
-  };
-
-  // 3. Salvar Conta Bancária (Com Trava de Segurança)
-  const handleSaveBank = async () => {
-    if (!pixKey) {
-      toast.error('Informe a chave Pix.');
-      return;
-    }
-
-    setSaveLoading(true);
-    try {
-      const saveAccount = httpsCallable(functions, 'saveWithdrawAccount');
-      const result: any = await saveAccount({ pixKey, pixKeyType });
-      
-      toast.success(result.data.message);
-      if (result.data.locked) {
-        setIsLocked(true);
-        setHoursUntilUnlock(24);
-      }
-      
-    } catch (error) {
-      toast.error('Erro ao salvar conta.');
-    } finally {
-      setSaveLoading(false);
-    }
-  };
-
-  // Formatador de moeda
-  const formatCurrency = (value: number) => 
-    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-primary animate-spin" />
-      </div>
-    );
-  }
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-black">
+      <Loader2 className="animate-spin text-primary w-8 h-8"/>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-black text-white p-6 pb-32">
-      <div className="max-w-6xl mx-auto space-y-8">
-        
-        {/* Cabeçalho */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="min-h-screen bg-black text-white p-4 md:p-8 pb-32">
+      <div className="max-w-5xl mx-auto">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-black italic tracking-tighter">
-              <span className="text-primary">Gestão</span> Financeira
+              Minha <span className="text-primary">Carteira</span>
             </h1>
-            <p className="text-white/40">Controle seu fluxo de caixa e saques.</p>
+            <p className="text-white/40 text-sm">Acompanhe seu saldo e realize saques.</p>
           </div>
-          <div className="flex gap-2 bg-[#121212] p-1 rounded-xl border border-white/10">
+          <div className="flex bg-[#121212] p-1 rounded-xl border border-white/10">
             <button 
-              onClick={() => setActiveTab('overview')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
-                activeTab === 'overview' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'
-              }`}
+              onClick={() => setActiveTab('wallet')} 
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'wallet' ? 'bg-white/10 text-white' : 'text-white/40'}`}
             >
-              <Wallet className="w-4 h-4 inline mr-2" />
-              Visão Geral
+              <Wallet className="w-4 h-4" /> Saldo
             </button>
             <button 
-              onClick={() => setActiveTab('settings')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
-                activeTab === 'settings' ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white'
-              }`}
+              onClick={() => setActiveTab('extract')} 
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'extract' ? 'bg-white/10 text-white' : 'text-white/40'}`}
             >
-              <Settings className="w-4 h-4 inline mr-2" />
-              Conta de Saque
+              <FileText className="w-4 h-4" /> Extrato
             </button>
           </div>
         </div>
 
-        {/* Aviso de Trava de Segurança */}
-        {isLocked && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 flex items-center gap-4">
-            <div className="p-3 bg-red-500/20 rounded-xl">
-              <Lock className="w-6 h-6 text-red-500" />
-            </div>
-            <div>
-              <p className="font-bold text-red-400">Saques Bloqueados Temporariamente</p>
-              <p className="text-sm text-white/60">
-                Por segurança, após alterar a chave Pix os saques ficam bloqueados por 24h.
-                Restam <strong className="text-white">{hoursUntilUnlock} horas</strong>.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'overview' && (
-          <>
-            {/* Cards Enterprise */}
-            <div className="grid gap-6 md:grid-cols-3">
-              
-              {/* Card 1: Disponível */}
-              <div className="bg-gradient-to-br from-[#1a1a1a] to-black border border-white/10 rounded-3xl p-8 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <Wallet size={80} className="text-primary" />
-                </div>
-                <p className="text-sm font-bold text-primary uppercase tracking-widest mb-1 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-                  Disponível para Saque
-                </p>
-                <h2 className="text-4xl font-black text-white mb-4">
-                  {formatCurrency(financialData.available)}
-                </h2>
-                <button 
-                  onClick={() => pixKey ? setWithdrawModalOpen(true) : setActiveTab('settings')}
-                  disabled={isLocked}
-                  className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 font-bold text-sm uppercase transition-colors ${
-                    isLocked 
-                      ? 'bg-gray-600 text-white/50 cursor-not-allowed' 
-                      : 'bg-primary hover:bg-orange-600 text-white'
-                  }`}
-                >
-                  {isLocked ? <Lock size={16} /> : <ArrowUpRight size={16} />}
-                  {isLocked ? `Bloqueado (${hoursUntilUnlock}h)` : (pixKey ? 'Sacar Pix' : 'Configurar Conta')}
-                </button>
-              </div>
-
-              {/* Card 2: A Receber (Futuro) */}
-              <div className="bg-[#121212] border border-white/10 rounded-3xl p-8 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <CalendarClock size={80} className="text-blue-500" />
-                </div>
-                <p className="text-sm font-bold text-blue-500 uppercase tracking-widest mb-1">A Receber (Crédito)</p>
-                <h2 className="text-4xl font-black text-blue-400 mb-4">
-                  {formatCurrency(financialData.toReceive)}
-                </h2>
-                <p className="text-xs text-white/30">
-                  Vendas no cartão de crédito aguardando liberação (D+30).
-                </p>
-              </div>
-
-              {/* Card 3: Status da Conta */}
-              <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
-                <p className="text-sm font-bold text-white/40 uppercase tracking-widest mb-2">Status da Conta</p>
-                <div className="flex items-center gap-2 mb-4">
-                  <Building2 className="text-green-500" />
-                  <span className="font-bold text-white">Conta Emprata Ativa</span>
-                </div>
-                
-                {pixKey ? (
-                  <div className="bg-black/50 rounded-xl p-3 mb-4">
-                    <p className="text-xs text-white/40 mb-1">Chave Pix ({pixKeyType})</p>
-                    <p className="font-mono text-white text-sm font-bold truncate">{pixKey}</p>
-                  </div>
-                ) : (
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 mb-4">
-                    <p className="text-xs text-yellow-200/80">
-                      Configure sua chave Pix para poder sacar.
-                    </p>
-                  </div>
-                )}
-
-                <div className="pt-4 border-t border-white/5">
-                  <p className="text-xs text-white/30">
-                    Seu dinheiro está seguro e segregado conforme normas do Bacen.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Histórico Recente */}
-            <div className="bg-[#121212] border border-white/10 rounded-3xl p-8">
-              <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                <History size={20} className="text-white/40" />
-                Últimas Movimentações
-              </h3>
-              <div className="text-center py-10 text-white/30 text-sm bg-black/50 rounded-xl border border-dashed border-white/10">
-                O histórico de transações aparecerá aqui assim que houver movimentações.
-              </div>
-            </div>
-          </>
-        )}
-
-        {activeTab === 'settings' && (
-          <div className="bg-[#121212] border border-white/10 max-w-2xl mx-auto rounded-3xl p-8">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="p-3 bg-primary/20 rounded-xl">
-                <Settings className="text-primary" size={24} />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-white">Conta de Recebimento</h2>
-                <p className="text-sm text-white/40">Para onde enviamos seu dinheiro quando você saca.</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Tipo de Chave Pix</label>
-                <div className="grid grid-cols-5 gap-2">
-                  {(['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'] as const).map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setPixKeyType(type)}
-                      className={`py-2 rounded-lg text-xs font-bold border transition-colors ${
-                        pixKeyType === type 
-                          ? 'bg-primary text-white border-primary' 
-                          : 'bg-transparent text-white/40 border-white/10 hover:bg-white/5'
-                      }`}
-                    >
-                      {type === 'EVP' ? 'Aleat.' : type}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Chave Pix</label>
-                <input 
-                  type="text" 
-                  value={pixKey}
-                  onChange={(e) => setPixKey(e.target.value)}
-                  placeholder={`Digite seu ${pixKeyType === 'EVP' ? 'código aleatório' : pixKeyType}`}
-                  className="w-full bg-black border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary outline-none"
-                />
-              </div>
-
-              {isLocked && (
-                <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 text-yellow-200 rounded-xl flex gap-3 text-sm">
-                  <AlertTriangle size={20} className="shrink-0 text-yellow-500" />
-                  <p>
-                    <strong>Modo de Segurança Ativo:</strong> Após salvar uma nova chave, 
-                    saques ficarão bloqueados por 24 horas.
-                  </p>
-                </div>
-              )}
-
-              <button 
-                onClick={handleSaveBank}
-                disabled={saveLoading}
-                className="w-full py-4 bg-primary hover:bg-orange-600 text-white rounded-xl font-black uppercase tracking-widest text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {saveLoading ? <Loader2 className="animate-spin" /> : 'Salvar Conta Bancária'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Modal de Saque */}
-        {withdrawModalOpen && (
-          <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-[#121212] border border-white/10 p-8 rounded-3xl w-full max-w-md shadow-2xl">
-              <h3 className="text-2xl font-black italic uppercase mb-6">Realizar Saque</h3>
-              
-              <div className="mb-6">
-                <p className="text-sm text-white/40 mb-1">Disponível</p>
-                <p className="text-3xl font-black text-primary">
-                  {formatCurrency(financialData.available)}
-                </p>
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Enviar para</label>
-                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-3">
-                  <p className="font-mono text-green-400 font-bold">{pixKey}</p>
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <label className="block text-xs font-bold text-white/60 mb-2 uppercase">Valor do Saque</label>
-                <input 
-                  type="number"
-                  value={withdrawAmount}
-                  onChange={(e) => setWithdrawAmount(e.target.value)}
-                  placeholder="0,00"
-                  className="w-full bg-black border border-white/10 rounded-xl px-4 py-4 text-2xl font-bold text-white focus:border-primary outline-none"
-                />
-                <p className="text-xs text-white/30 mt-2">Taxa de transferência: R$ 5,00 (descontado do saldo)</p>
-              </div>
-
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setWithdrawModalOpen(false)}
-                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button 
-                  onClick={handleWithdraw}
-                  disabled={withdrawLoading}
-                  className="flex-1 py-3 bg-primary hover:bg-orange-600 text-white rounded-xl font-black uppercase transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {withdrawLoading ? <Loader2 className="animate-spin" /> : 'Confirmar'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
+        <AnimatePresence mode="wait">
+           {activeTab === 'wallet' ? <WalletTab /> : <ExtractTab />}
+        </AnimatePresence>
       </div>
     </div>
+  );
+}
+
+function WalletTab() {
+  const [balance, setBalance] = useState({ 
+    available: 0, 
+    withdrawFee: 5, 
+    hasWithdrawAccount: false, 
+    isLocked: false, 
+    hoursUntilUnlock: 0, 
+    pixKey: '' 
+  });
+  const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawLoading, setWithdrawLoading] = useState(false);
+  
+  // Config Pix
+  const [pixKey, setPixKey] = useState('');
+  const [pixKeyType, setPixKeyType] = useState('CPF');
+  const [configLoading, setConfigLoading] = useState(false);
+
+  const fetchBalance = async () => {
+     try {
+       const fn = httpsCallable(functions, 'financeGetBalance');
+       const res = await fn() as { data: typeof balance };
+       setBalance(res.data);
+       if(res.data.hasWithdrawAccount) setPixKey(res.data.pixKey);
+     } catch(e) { console.error(e) }
+  };
+
+  useEffect(() => { fetchBalance(); }, []);
+
+  const handleSavePix = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setConfigLoading(true);
+    try {
+      const saveFn = httpsCallable(functions, 'saveWithdrawAccount');
+      await saveFn({ pixKey, pixKeyType });
+      toast.success('Conta de saque salva!');
+      setIsConfigModalOpen(false);
+      fetchBalance();
+    } catch (err: unknown) { 
+      const error = err as { message?: string };
+      toast.error(error.message || 'Erro ao salvar'); 
+    } finally { setConfigLoading(false); }
+  };
+
+  const handleWithdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWithdrawLoading(true);
+    const val = parseFloat(withdrawAmount.replace(/[^0-9,]/g, '').replace(',', '.'));
+    try {
+      const wFn = httpsCallable(functions, 'financeWithdraw');
+      await wFn({ amount: val });
+      toast.success('Saque enviado com sucesso!');
+      setIsWithdrawModalOpen(false);
+      setWithdrawAmount('');
+      fetchBalance();
+    } catch (err: unknown) { 
+      const error = err as { message?: string };
+      toast.error(error.message || 'Erro no saque'); 
+    } finally { setWithdrawLoading(false); }
+  };
+
+  return (
+    <>
+      <div className="grid md:grid-cols-2 gap-6">
+         {/* SALDO */}
+         <div className="bg-gradient-to-br from-[#1a1a1a] to-black border border-white/10 rounded-3xl p-8 relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-32 bg-primary/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-primary/10 transition-colors" />
+            <div className="relative z-10">
+              <p className="text-sm font-bold text-white/40 uppercase tracking-widest mb-1">Saldo Disponível</p>
+              <h2 className="text-4xl font-black text-white mb-6">{formatCurrency(balance.available)}</h2>
+              <button 
+                onClick={() => balance.hasWithdrawAccount ? setIsWithdrawModalOpen(true) : setIsConfigModalOpen(true)}
+                disabled={balance.isLocked}
+                className="w-full py-3 bg-primary hover:bg-orange-600 rounded-xl font-bold uppercase transition-colors disabled:opacity-50"
+              >
+                {balance.isLocked ? `Bloqueado (${balance.hoursUntilUnlock}h)` : 'Sacar Pix'}
+              </button>
+            </div>
+         </div>
+
+         {/* CONTA DESTINO */}
+         <div className="bg-[#121212] border border-white/10 rounded-3xl p-8 flex flex-col justify-center">
+            <div className="flex justify-between items-start mb-4">
+               <div>
+                  <p className="text-sm font-bold text-white/40 uppercase tracking-widest mb-1">Conta de Destino</p>
+                  {balance.hasWithdrawAccount ? (
+                     <div className="flex items-center gap-2 text-green-400 font-bold">
+                       <CheckCircle2 className="w-4 h-4"/> Ativa
+                     </div>
+                  ) : (
+                     <div className="flex items-center gap-2 text-yellow-500 font-bold">
+                       <AlertTriangle className="w-4 h-4"/> Pendente
+                     </div>
+                  )}
+               </div>
+               <button onClick={() => setIsConfigModalOpen(true)} className="text-xs font-bold text-white/40 hover:text-white underline">
+                 Alterar
+               </button>
+            </div>
+            {balance.hasWithdrawAccount ? (
+               <div className="bg-white/5 p-4 rounded-xl border border-white/5">
+                  <p className="text-xs text-white/40 mb-1">Chave Pix</p>
+                  <p className="font-mono text-lg font-bold truncate">{balance.pixKey}</p>
+               </div>
+            ) : (
+              <p className="text-sm text-white/50">Configure sua chave Pix para receber os saques.</p>
+            )}
+         </div>
+      </div>
+
+      {/* MODAL CONFIG PIX */}
+      <AnimatePresence>
+        {isConfigModalOpen && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+              <motion.div 
+                initial={{scale:0.95, opacity:0}} 
+                animate={{scale:1, opacity:1}} 
+                exit={{scale:0.95, opacity:0}}
+                className="bg-[#121212] border border-white/10 w-full max-w-md rounded-3xl p-8 relative"
+              >
+                 <button onClick={() => setIsConfigModalOpen(false)} className="absolute top-4 right-4 text-white/30 hover:text-white text-xl">
+                   ✕
+                 </button>
+                 <h3 className="text-xl font-bold mb-4">Configurar Chave Pix</h3>
+                 <form onSubmit={handleSavePix} className="space-y-4">
+                    <div className="grid grid-cols-3 gap-2">
+                       {['CPF', 'CNPJ', 'EMAIL', 'PHONE', 'EVP'].map(t => (
+                          <button 
+                            key={t} 
+                            type="button" 
+                            onClick={() => setPixKeyType(t)} 
+                            className={`text-xs py-2 rounded border transition-colors ${pixKeyType===t ? 'bg-primary border-primary text-white' : 'border-white/10 text-white/40 hover:text-white'}`}
+                          >
+                            {t}
+                          </button>
+                       ))}
+                    </div>
+                    <input 
+                      required 
+                      value={pixKey} 
+                      onChange={e=>setPixKey(e.target.value)} 
+                      className="w-full bg-black border border-white/10 rounded-xl p-3 text-white placeholder:text-white/30 outline-none focus:border-primary" 
+                      placeholder="Sua chave..." 
+                    />
+                    <button 
+                      disabled={configLoading} 
+                      className="w-full py-3 bg-primary hover:bg-orange-600 rounded-xl font-bold uppercase transition-colors disabled:opacity-50"
+                    >
+                      {configLoading ? <Loader2 className="animate-spin mx-auto w-5 h-5"/> : 'Salvar'}
+                    </button>
+                 </form>
+              </motion.div>
+           </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL SAQUE */}
+      <AnimatePresence>
+        {isWithdrawModalOpen && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm">
+              <motion.div 
+                initial={{scale:0.95, opacity:0}} 
+                animate={{scale:1, opacity:1}} 
+                exit={{scale:0.95, opacity:0}}
+                className="bg-[#121212] border border-white/10 w-full max-w-md rounded-3xl p-8 relative"
+              >
+                 <button onClick={() => setIsWithdrawModalOpen(false)} className="absolute top-4 right-4 text-white/30 hover:text-white text-xl">
+                   ✕
+                 </button>
+                 <h3 className="text-xl font-bold mb-1">Quanto quer sacar?</h3>
+                 <p className="text-white/40 text-sm mb-6">
+                   Disponível: {formatCurrency(balance.available - balance.withdrawFee)}
+                 </p>
+                 <form onSubmit={handleWithdraw} className="space-y-4">
+                    <IMaskInput 
+                       mask="R$ num" 
+                       blocks={{ num: { mask: Number, scale: 2, thousandsSeparator: '.', padFractionalZeros: true, radix: ',' } } as never}
+                       value={withdrawAmount} 
+                       onAccept={(v: string)=>setWithdrawAmount(v)}
+                       className="w-full bg-black border border-white/10 rounded-xl p-4 text-3xl font-bold text-white outline-none focus:border-primary"
+                       placeholder="R$ 0,00"
+                    />
+                    <div className="bg-yellow-500/10 p-3 rounded-xl text-xs text-yellow-200/70">
+                      Taxa de saque: R$ {balance.withdrawFee.toFixed(2)}
+                    </div>
+                    <button 
+                      disabled={withdrawLoading} 
+                      className="w-full py-3 bg-primary hover:bg-orange-600 rounded-xl font-bold uppercase transition-colors disabled:opacity-50"
+                    >
+                      {withdrawLoading ? <Loader2 className="animate-spin mx-auto w-5 h-5"/> : 'Confirmar'}
+                    </button>
+                 </form>
+              </motion.div>
+           </div>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+function ExtractTab() {
+  const [items, setItems] = useState<Array<{
+    id: string;
+    type: string;
+    value: number;
+    description: string;
+    date: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+     const fn = httpsCallable(functions, 'financeGetStatement');
+     fn().then((res) => {
+       const data = res.data as { data: typeof items };
+       setItems(data.data || []);
+     }).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return (
+    <div className="flex justify-center py-20">
+      <Loader2 className="animate-spin text-primary w-8 h-8"/>
+    </div>
+  );
+
+  return (
+     <motion.div 
+       initial={{opacity:0, y:10}} 
+       animate={{opacity:1, y:0}}
+       className="bg-[#121212] border border-white/10 rounded-3xl overflow-hidden mt-4"
+     >
+        {items.length === 0 ? (
+          <div className="p-10 text-center text-white/30">Sem movimentações.</div>
+        ) : items.map((tx) => (
+           <div key={tx.id} className="p-4 border-b border-white/5 flex justify-between items-center hover:bg-white/5 transition-colors">
+              <div>
+                <p className="font-bold text-sm">{tx.description}</p>
+                <p className="text-xs text-white/40">{tx.date}</p>
+              </div>
+              <span className={`font-mono font-bold ${tx.type === 'WITHDRAW' ? 'text-red-400' : 'text-green-400'}`}>
+                {tx.type === 'WITHDRAW' ? '-' : '+'}
+                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(tx.value)}
+              </span>
+           </div>
+        ))}
+     </motion.div>
   );
 }

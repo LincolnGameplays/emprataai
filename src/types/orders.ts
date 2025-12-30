@@ -1,136 +1,156 @@
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'dispatched' | 'delivered' | 'billing_requested' | 'closed' | 'cancelled';
+/**
+ * Order Types for Emprata Delivery Hub
+ * Unified order model from multiple sources
+ */
 
-export interface Customer {
-  name: string;
-  cpf: string;
-  phone?: string;
-  table?: string;
-  // Adicionado para suportar Logística e DriverApp
-  address?: {
-    street?: string;
-    number?: string;
-    neighborhood?: string;
-    city?: string;
-    complement?: string;
-    reference?: string; // Para pontos de referência na entrega
-  };
-}
+// ══════════════════════════════════════════════════════════════════
+// ORDER SOURCES - De onde veio o pedido
+// ══════════════════════════════════════════════════════════════════
+
+export type OrderSource = 'APP_PROPRIO' | 'IFOOD' | 'RAPPI' | 'UBER_EATS' | 'WHATSAPP';
+
+export type OrderStatus = 
+  | 'PENDING'           // Aguardando confirmação
+  | 'CONFIRMED'         // Restaurante aceitou
+  | 'PREPARING'         // Em preparo
+  | 'READY_FOR_PICKUP'  // Pronto para coleta
+  | 'OUT_FOR_DELIVERY'  // Saiu para entrega
+  | 'DELIVERED'         // Entregue
+  | 'CANCELLED'         // Cancelado
+  | 'REFUNDED';         // Reembolsado
+
+export type DeliveryType = 'DELIVERY' | 'PICKUP' | 'DINE_IN';
+
+// ══════════════════════════════════════════════════════════════════
+// ORDER ITEM
+// ══════════════════════════════════════════════════════════════════
 
 export interface OrderItem {
   id: string;
-  menuItemId: string;
+  productId?: string;       // ID interno no Emprata (se tiver)
   name: string;
   quantity: number;
   price: number;
+  costPrice?: number;       // Para cálculo de lucro
+  options?: {
+    name: string;
+    price: number;
+  }[];
   notes?: string;
-  image?: string;
-  imageUrl?: string;
-  category?: string;
-  status?: 'pending' | 'done';
 }
 
-export interface CartItem extends OrderItem {
-  cartId: string;
+// ══════════════════════════════════════════════════════════════════
+// CUSTOMER
+// ══════════════════════════════════════════════════════════════════
+
+export interface OrderCustomer {
+  id?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  documentNumber?: string;  // CPF
 }
+
+// ══════════════════════════════════════════════════════════════════
+// DELIVERY ADDRESS
+// ══════════════════════════════════════════════════════════════════
+
+export interface DeliveryAddress {
+  street: string;
+  number: string;
+  complement?: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  zipCode?: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
+  reference?: string;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// INTEGRATION METADATA
+// ══════════════════════════════════════════════════════════════════
+
+export interface IntegrationMetadata {
+  originalPayload: unknown;        // Payload original para debug
+  externalDriverId?: string;       // ID do motoboy do marketplace
+  externalDriverName?: string;
+  deliveryMode?: 'MERCHANT' | 'MARKETPLACE';  // Quem faz a entrega
+  commissionRate?: number;         // Taxa do marketplace (%)
+  estimatedMarketplaceFee?: number;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FINANCIALS
+// ══════════════════════════════════════════════════════════════════
+
+export interface OrderFinancials {
+  subtotal: number;
+  deliveryFee: number;
+  discount?: number;
+  total: number;
+  // Após pagamento:
+  grossAmount?: number;
+  marketplaceFee?: number;      // Taxa iFood/Rappi
+  emprataFee?: number;
+  costOfGoods?: number;
+  netProfit?: number;
+  profitMargin?: number;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MAIN ORDER INTERFACE
+// ══════════════════════════════════════════════════════════════════
 
 export interface Order {
   id: string;
   restaurantId: string;
-  ownerId?: string;
-  consumerId?: string; // For marketplace orders
-  customer: Customer;
-  items: OrderItem[];
-  subtotal: number;
-  total: number;
+  
+  // Source tracking
+  source: OrderSource;
+  externalId?: string;          // ID original no iFood/Rappi
+  
+  // Status
   status: OrderStatus;
-  createdAt: any;
-  updatedAt?: any;
-  completedAt?: any;
+  paymentStatus?: 'PENDING' | 'PAID' | 'CREDITED' | 'REFUNDED';
   
-  // Enhanced Payment Methods
-  paymentMethod: 
-    | 'pix_online' 
-    | 'credit_online' 
-    | 'credit_machine' 
-    | 'debit_machine' 
-    | 'cash'
-    | 'pix' 
-    | 'credit' 
-    | 'debit';
-  paymentStatus?: 'pending' | 'paid' | 'failed' | 'refunded';
-  changeFor?: number; // If cash, customer needs change for this amount
+  // Delivery
+  deliveryType: DeliveryType;
+  deliveryAddress?: DeliveryAddress;
+  estimatedDeliveryTime?: number; // minutos
   
-  isOrderBumpAccepted?: boolean;
+  // Batching
+  batchId?: string;             // ID da rota agrupada
+  batchPosition?: number;       // Ordem na rota
   
-  // Campos de Logística
+  // Relations
+  customer: OrderCustomer;
+  items: OrderItem[];
+  financials: OrderFinancials;
+  
+  // Driver
   driverId?: string;
-  driverName?: string;
-  waiterId?: string;
-  deliveryFee?: number;
-  deliveryPin?: string;
-  deliveryProofUrl?: string;
-  deliveryAttemptCoords?: { lat: number; lng: number };
-  dispatchedAt?: any;
-  deliveredAt?: any;
-  estimatedDelivery?: { min: number; max: number }; // minutes
+  dispatchedAt?: Date;
+  deliveredAt?: Date;
   
-  // Campos de Analytics
-  isPaid?: boolean;
-  discountPercent?: number;
-  discountAmount?: number;
-  emprataCoinsEarned?: number; // Gamification
-  couponCode?: string;
+  // Integration
+  integrationMetadata?: IntegrationMetadata;
   
-  // Campos de Restaurante
-  restaurant?: {
-    name?: string;
-    phone?: string;
-    logoUrl?: string;
-  };
+  // Timestamps
+  createdAt: Date;
+  updatedAt?: Date;
+  paidAt?: Date;
   
-  // Financial Gateway (Online payments)
-  paymentId?: string;          // Asaas payment ID
-  paymentUrl?: string;         // Invoice/Pix URL
-  emprataFee?: number;         // Platform commission
-  restaurantValue?: number;    // Restaurant net value
-  paidAt?: any;                // When payment was confirmed
-  
-  // AI Fraud Guard
-  fraudScore?: number;         // 0-100 risk score
-  riskLevel?: 'low' | 'medium' | 'high';
+  // Notes
+  customerNotes?: string;
+  internalNotes?: string;
 }
 
-// Tipos para Dashboard e Analytics
-export interface DashboardMetrics {
-  totalRevenue: number;
-  todayRevenue: number;
-  activeOrders: number;
-  totalOrders: number;
-  averageTicket: number;
-  conversionRate: number;
-  dailySales: { date: string; value: number }[];
-  topItems: { name: string; quantity: number; image: string }[];
-  recentOrders: Order[];
-  revenueChange: number;
-  ordersChange: number;
-  ticketChange: number;
-  // Legacy compatibility
-  topSellingItems?: { name: string; quantity: number; revenue: number }[];
-  ordersByHour?: { hour: number; count: number }[];
-}
+// ══════════════════════════════════════════════════════════════════
+// CREATE ORDER INPUT (para novos pedidos)
+// ══════════════════════════════════════════════════════════════════
 
-// Tipos para IA
-export interface AISmartOrganizeResponse {
-  categories: {
-    title: string;
-    description: string;
-    items: string[];
-  }[];
-  orderBumps: {
-    itemId: string;
-    reason: string;
-  }[];
-  // Campos adicionais para menuAi.ts
-  suggestedHighlights?: string[];
-  improvedDescriptions?: Record<string, string>;
-}
+export type CreateOrderInput = Omit<Order, 'id' | 'createdAt' | 'updatedAt'>;
