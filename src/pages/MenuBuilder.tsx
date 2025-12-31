@@ -52,6 +52,10 @@ const createDefaultMenu = (ownerId: string): MenuFormData => ({
 // ══════════════════════════════════════════════════════════════════
 // PHONE PREVIEW COMPONENT
 // ══════════════════════════════════════════════════════════════════
+import { BulkImportModal } from '../components/admin/BulkImportModal';
+
+// ... (existing code)
+
 function PhonePreview({ menu }: { menu: MenuFormData }) {
   const highlights = menu.categories
     .flatMap(c => c.items)
@@ -164,6 +168,7 @@ export default function MenuBuilder() {
   const [showQR, setShowQR] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   const [editingItem, setEditingItem] = useState<{ catId: string; itemId: string } | null>(null);
 
@@ -281,6 +286,30 @@ export default function MenuBuilder() {
       return {
         ...prev,
         categories: prev.categories.filter(c => c.id !== catId)
+      };
+    });
+  };
+
+  const handleBulkImport = (data: any) => {
+    setMenu(prev => {
+      if (!prev) return null;
+      
+      const newCategories = data.categories.map((c: any) => ({
+        id: crypto.randomUUID(),
+        title: c.title,
+        items: c.items.map((i: any) => ({
+          id: crypto.randomUUID(),
+          title: i.title,
+          description: i.description || '',
+          price: Number(i.price) || 0,
+          imageUrl: null,
+          isHighlight: false
+        }))
+      }));
+  
+      return {
+        ...prev,
+        categories: [...prev.categories, ...newCategories]
       };
     });
   };
@@ -842,15 +871,28 @@ export default function MenuBuilder() {
           <PhonePreview menu={menu} />
           
           {menu.slug && (
-            <a 
-              href={`/menu/${menu.slug}`}
+            <>
+              <button 
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 rounded-xl text-xs font-bold uppercase tracking-wider border border-purple-500/30 transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span className="hidden md:inline">Importar Mágico</span>
+              </button>
+
+          {/* CORREÇÃO DO ERRO DE SINTAXE AQUI */}
+          {menu.slug && (
+            <Link 
+              to={`/menu/${menu.slug}`}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-2 mt-4 text-xs text-white/40 hover:text-primary transition-colors"
             >
               <ExternalLink className="w-4 h-4" />
               Ver página pública
-            </a>
+            </Link>
+          )}
+            </>
           )}
         </div>
       </div>
@@ -905,6 +947,11 @@ export default function MenuBuilder() {
           </motion.div>
         )}
       </AnimatePresence>
+      <BulkImportModal 
+        isOpen={showImportModal} 
+        onClose={() => setShowImportModal(false)} 
+        onImport={handleBulkImport} 
+      />
     </div>
   );
 }

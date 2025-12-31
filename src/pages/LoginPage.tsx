@@ -11,7 +11,8 @@ import { AuthModal } from '../components/AuthModal';
 import { useAuth } from '../hooks/useAuth';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../config/firebase';
+import { signInAnonymously } from 'firebase/auth';
+import { functions, auth } from '../config/firebase';
 
 // ══════════════════════════════════════════════════════════════════
 // PLAN CONFIG
@@ -243,10 +244,28 @@ export default function LoginPage() {
           {role === 'owner' && !pendingPlan && (
             <Link 
               to="/waiter-login" 
-              className="block text-center mt-6 text-xs font-bold text-white/30 hover:text-white transition-colors"
+              className="block text-center mt-4 text-xs font-bold text-white/30 hover:text-white transition-colors"
             >
               Sou Garçom / Staff
             </Link>
+          )}
+
+          {/* Guest Access - Zero Friction Onboarding */}
+          {role === 'consumer' && !pendingPlan && (
+            <button 
+              onClick={async () => {
+                try {
+                  await signInAnonymously(auth);
+                  navigate('/marketplace');
+                  toast.success("Modo Visitante Ativado! 👀");
+                } catch (e) {
+                  toast.error("Erro ao entrar como visitante");
+                }
+              }}
+              className="block w-full text-center mt-4 text-sm text-white/40 hover:text-white transition-colors underline underline-offset-4"
+            >
+              Só estou dando uma olhadinha (Entrar sem cadastro)
+            </button>
           )}
         </div>
 

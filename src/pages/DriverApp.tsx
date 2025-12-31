@@ -1,605 +1,445 @@
 /**
- * ⚡ DRIVER APP - Mobile-First Delivery Interface ⚡
- * Dark mode, big buttons for gloves, Waze/Maps integration
+ * DriverApp - Robust Mobile App for Delivery Drivers
  * 
  * Features:
- * - PIN-based login
- * - Order queue
- * - Navigation deep links
- * - Security PIN validation for delivery confirmation
- * - Photo proof for absent customers
+ * - setDoc with merge for auto-create driver document
+ * - GPS permission handling with error fallback
+ * - Heartbeat using watchPosition
+ * - 4-digit delivery PIN verification
+ * - Uber Black-style dark UI
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Bike, MapPin, Navigation, Phone, Package,
-  CheckCircle, Camera, X, ChevronRight, LogOut,
-  AlertTriangle, Loader2
+  MapPin, Navigation, CheckCircle, Phone, Bike, 
+  Power, Lock, Clock, X, Loader2 
 } from 'lucide-react';
-import { 
-  collection, query, where, onSnapshot, 
-  doc, updateDoc, serverTimestamp, getDocs
-} from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { collection, query, where, onSnapshot, doc, setDoc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { toast } from 'sonner';
-import type { Order } from '../types/orders';
-import type { Driver } from '../types/logistics';
-
-// ══════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ══════════════════════════════════════════════════════════════════
 
 export default function DriverApp() {
-  const [driver, setDriver] = useState<Driver | null>(null);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Staff session from localStorage
+  const [staffSession, setStaffSession] = useState<any>(null);
+  
+  // Estado local para controle imediato da UI
+  const [isOnline, setIsOnline] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeDelivery, setActiveDelivery] = useState<any>(null);
+  const [earnings, setEarnings] = useState(0);
+  
+  // PIN de Entrega (4 Dígitos)
+  const [deliveryPin, setDeliveryPin] = useState('');
+  const [showPinModal, setShowPinModal] = useState(false);
 
-  // Load orders assigned to this driver
+  // Load staff session
   useEffect(() => {
-    if (!driver) return;
+    const token = localStorage.getItem('emprata_staff_token');
+    if (token) {
+      try {
+        setStaffSession(JSON.parse(token));
+      } catch (e) {
+        console.error('Invalid staff token');
+      }
+    }
+  }, []);
 
-    const ordersQuery = query(
-      collection(db, 'orders'),
-      where('driverId', '==', driver.id),
-      where('status', '==', 'dispatched')
-    );
-
-    const unsub = onSnapshot(ordersQuery, (snapshot) => {
-      const orderList = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Order[];
-      setOrders(orderList);
-    });
-
-    return () => unsub();
-  }, [driver]);
-
-  // Handle delivery completion
-  const handleDeliveryComplete = async (order: Order, proofUrl?: string) => {
-    try {
-      setLoading(true);
-      
-      // Get current position
-      let coords: { lat: number; lng: number } | undefined;
-      if (navigator.geolocation) {
-        try {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
-          });
-          coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-        } catch (e) {
-          console.log('Geolocation not available');
+  // 1. VERIFICAR STATUS INICIAL AO ABRIR O APP
+  useEffect(() => {
+    if (!staffSession?.id) return;
+    const checkStatus = async () => {
+      try {
+        const docRef = doc(db, 'drivers', staffSession.id);
+        const snap = await getDoc(docRef);
+        if (snap.exists() && snap.data().currentStatus !== 'offline') {
+          setIsOnline(true);
         }
+      } catch (e) {
+        console.log("Initial status check failed");
       }
+    };
+    checkStatus();
+  }, [staffSession]);
 
-      const orderRef = doc(db, 'orders', order.id);
-      await updateDoc(orderRef, {
-        status: 'delivered',
-        deliveredAt: serverTimestamp(),
-        deliveryProofUrl: proofUrl || null,
-        deliveryAttemptCoords: coords || null
-      });
+  // 2. FUNÇÃO DE TOGGLE (LIGAR/DESLIGAR) - CORRIGIDA
+  const toggleOnlineStatus = async () => {
+    if (!staffSession?.id) {
+      toast.error("Sessão inválida. Faça login novamente.");
+      return;
+    }
+    setIsLoading(true);
 
-      // Update driver status back to available
-      if (driver) {
-        const driverRef = doc(db, 'drivers', driver.id);
-        await updateDoc(driverRef, {
-          currentStatus: orders.length <= 1 ? 'available' : 'busy' // If this was last order
+    try {
+      if (!isOnline) {
+        // --- TENTANDO FICAR ONLINE ---
+        if (!navigator.geolocation) {
+          throw new Error("GPS não suportado neste dispositivo.");
+        }
+
+        // Força pegar a localização ANTES de mudar o status
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const { latitude, longitude } = pos.coords;
+            
+            // USAMOS setDoc PARA GARANTIR QUE O DOCUMENTO EXISTA
+            await setDoc(doc(db, 'drivers', staffSession.id), {
+              name: staffSession.name || 'Motorista',
+              restaurantId: staffSession.restaurantId,
+              location: { lat: latitude, lng: longitude },
+              currentStatus: 'available', // Disponível
+              lastUpdate: serverTimestamp(),
+            }, { merge: true });
+
+            setIsOnline(true);
+            toast.success("Você está ONLINE! Aguardando chamados.");
+            setIsLoading(false);
+          }, 
+          (error) => {
+            console.error(error);
+            toast.error("Erro de GPS. Permita a localização e tente novamente.");
+            setIsLoading(false);
+          }, 
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+
+      } else {
+        // --- FICANDO OFFLINE ---
+        await updateDoc(doc(db, 'drivers', staffSession.id), {
+          currentStatus: 'offline',
+          lastUpdate: serverTimestamp()
         });
+        setIsOnline(false);
+        toast("Você está OFFLINE.");
+        setIsLoading(false);
       }
-
-      toast.success('Entrega confirmada!');
-      setIsConfirmModalOpen(false);
-      setSelectedOrder(null);
-    } catch (error) {
-      console.error(error);
-      toast.error('Erro ao confirmar entrega');
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro de conexão.");
+      setIsLoading(false);
     }
   };
 
-  // Logout
-  const handleLogout = () => {
-    setDriver(null);
-    localStorage.removeItem('driverSession');
+  // 3. HEARTBEAT (GPS TRACKER EM BACKGROUND)
+  useEffect(() => {
+    if (!isOnline || !staffSession?.id) return;
+    
+    // Atualiza posição usando watchPosition para tracking contínuo
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        updateDoc(doc(db, 'drivers', staffSession.id), {
+          location: { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          lastUpdate: serverTimestamp()
+        }).catch(() => {}); // Ignora erros silenciosos de rede no heartbeat
+      },
+      (err) => console.log("GPS Error", err),
+      { enableHighAccuracy: true, maximumAge: 10000 }
+    );
+    
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isOnline, staffSession]);
+
+  // 4. ESCUTAR PEDIDOS (DISPATCHED)
+  useEffect(() => {
+    if (!staffSession?.id) return;
+    
+    const q = query(
+      collection(db, 'orders'),
+      where('driverId', '==', staffSession.id),
+      where('status', 'in', ['dispatched', 'DISPATCHED', 'out_for_delivery'])
+    );
+    
+    const unsub = onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setActiveDelivery({ id: snap.docs[0].id, ...data });
+      } else {
+        setActiveDelivery(null);
+      }
+    });
+    
+    return () => unsub();
+  }, [staffSession]);
+
+  // 5. FINALIZAR ENTREGA COM PIN 4 DÍGITOS
+  const handleVerifyPin = async () => {
+    if (!activeDelivery || !staffSession?.id) return;
+    
+    if (activeDelivery.deliveryPin && deliveryPin !== activeDelivery.deliveryPin) {
+      toast.error("PIN Incorreto!");
+      setDeliveryPin('');
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      await updateDoc(doc(db, 'orders', activeDelivery.id), { 
+        status: 'DELIVERED', 
+        deliveredAt: serverTimestamp() 
+      });
+      
+      // Volta para disponível
+      await updateDoc(doc(db, 'drivers', staffSession.id), { 
+        currentStatus: 'available' 
+      });
+      
+      setEarnings(prev => prev + (activeDelivery.deliveryFee || 5));
+      toast.success(`Entrega finalizada!`);
+      setShowPinModal(false);
+      setDeliveryPin('');
+    } catch(e) {
+      toast.error("Erro ao finalizar.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  // If not logged in, show PIN login
-  if (!driver) {
-    return <DriverLogin onLogin={setDriver} />;
-  }
-
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* HEADER */}
-      <header className="sticky top-0 z-50 bg-black border-b border-white/10 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-              <Bike className="w-5 h-5 text-green-400" />
-            </div>
-            <div>
-              <p className="font-bold">{driver.name}</p>
-              <p className="text-xs text-green-400">Online</p>
-            </div>
+    <div className="min-h-screen bg-black text-white font-sans flex flex-col relative overflow-hidden selection:bg-green-500 selection:text-black">
+      
+      {/* HEADER DE STATUS (Fixo) */}
+      <div className={`p-6 flex justify-between items-center transition-all duration-500 z-20 ${isOnline ? 'bg-[#121212] border-b border-white/5' : 'bg-transparent'}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all ${isOnline ? 'bg-green-500 text-black shadow-green-500/20' : 'bg-white/10 text-white/20'}`}>
+            <Bike size={24} />
           </div>
-          <button
-            onClick={handleLogout}
-            className="p-2 hover:bg-white/10 rounded-xl"
-          >
-            <LogOut className="w-5 h-5 text-white/40" />
-          </button>
+          <div>
+            <h2 className="font-bold text-lg leading-none">{staffSession?.name?.split(' ')[0] || 'Motorista'}</h2>
+            <p className={`text-[10px] font-black uppercase tracking-widest mt-1 ${isOnline ? 'text-green-500' : 'text-white/30'}`}>
+              {isOnline ? '● Online' : '○ Offline'}
+            </p>
+          </div>
         </div>
-      </header>
-
-      <main className="p-4">
-        <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-          <Package className="w-5 h-5" />
-          Minha Fila ({orders.length})
-        </h2>
-
-        {orders.length === 0 ? (
-          <div className="text-center py-20">
-            <Bike className="w-16 h-16 mx-auto mb-4 text-white/20" />
-            <p className="text-xl font-bold text-white/40">Sem entregas no momento</p>
-            <p className="text-sm text-white/30 mt-2">Novas entregas aparecerão aqui</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {orders.map((order) => (
-              <motion.div
-                key={order.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white/5 border border-white/10 rounded-2xl p-4"
-              >
-                {/* Customer Name */}
-                <h3 className="text-2xl font-black mb-2">{order.customer.name}</h3>
-
-                {/* Address - GIANT */}
-                {order.customer.address && (
-                  <div className="bg-white/5 rounded-xl p-4 mb-4">
-                    <p className="text-xl font-bold leading-relaxed">
-                      {order.customer.address.street}, {order.customer.address.number}
-                    </p>
-                    {order.customer.address.complement && (
-                      <p className="text-lg text-white/60">{order.customer.address.complement}</p>
-                    )}
-                    <p className="text-lg text-primary font-bold mt-1">
-                      {order.customer.address.neighborhood}
-                    </p>
-                    {order.customer.address.reference && (
-                      <p className="text-sm text-white/40 mt-2">
-                        📍 {order.customer.address.reference}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {/* Phone */}
-                {order.customer.phone && (
-                  <a
-                    href={`tel:${order.customer.phone}`}
-                    className="flex items-center gap-3 p-4 bg-blue-500/20 rounded-xl mb-4"
-                  >
-                    <Phone className="w-6 h-6 text-blue-400" />
-                    <span className="text-lg font-bold">{order.customer.phone}</span>
-                  </a>
-                )}
-
-                {/* Navigation Buttons */}
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <a
-                    href={`waze://?q=${encodeURIComponent(
-                      order.customer.address 
-                        ? `${order.customer.address.street}, ${order.customer.address.number}, ${order.customer.address.city}`
-                        : ''
-                    )}`}
-                    className="flex items-center justify-center gap-2 py-4 bg-[#33CCFF] text-black rounded-xl font-bold text-lg"
-                  >
-                    <Navigation className="w-6 h-6" />
-                    Waze
-                  </a>
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                      order.customer.address 
-                        ? `${order.customer.address.street}, ${order.customer.address.number}, ${order.customer.address.city}`
-                        : ''
-                    )}`}
-                    target="_blank"
-                    className="flex items-center justify-center gap-2 py-4 bg-white text-black rounded-xl font-bold text-lg"
-                  >
-                    <MapPin className="w-6 h-6" />
-                    Maps
-                  </a>
-                </div>
-
-                {/* Confirm Delivery Button */}
-                <button
-                  onClick={() => {
-                    setSelectedOrder(order);
-                    setIsConfirmModalOpen(true);
-                  }}
-                  className="w-full py-6 bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl font-black text-xl flex items-center justify-center gap-3 active:scale-95 transition-transform"
-                >
-                  <CheckCircle className="w-8 h-8" />
-                  CONFIRMAR ENTREGA
-                </button>
-              </motion.div>
-            ))}
+        {isOnline && (
+          <div className="bg-[#1a1a1a] border border-white/10 px-4 py-2 rounded-xl text-right">
+            <p className="text-[9px] text-white/40 uppercase font-bold">Saldo</p>
+            <p className="text-xl font-mono font-black text-green-400">R$ {earnings.toFixed(2)}</p>
           </div>
         )}
-      </main>
+      </div>
 
-      {/* CONFIRMATION MODAL */}
+      {/* ÁREA PRINCIPAL */}
+      <div className="flex-1 p-6 relative z-10 flex flex-col justify-center">
+        
+        {!isOnline ? (
+          <div className="text-center space-y-8">
+            <div className="relative mx-auto w-56 h-56 flex items-center justify-center">
+              {/* Círculo Pulsante */}
+              <div className="absolute inset-0 bg-green-500/10 rounded-full animate-ping opacity-20" />
+              <div className="absolute inset-4 bg-green-500/5 rounded-full animate-pulse opacity-40" />
+              
+              <button 
+                onClick={toggleOnlineStatus}
+                disabled={isLoading}
+                className="relative w-48 h-48 bg-[#121212] rounded-full border-4 border-white/5 flex flex-col items-center justify-center hover:scale-105 active:scale-95 hover:border-green-500 transition-all shadow-2xl group z-10"
+              >
+                {isLoading ? (
+                  <Loader2 size={48} className="text-green-500 animate-spin" />
+                ) : (
+                  <>
+                    <Power size={48} className="text-white/20 group-hover:text-green-500 transition-colors mb-2" />
+                    <span className="text-xs font-black uppercase text-white/40 group-hover:text-white tracking-widest">INICIAR</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <p className="text-white/30 max-w-[200px] mx-auto text-xs font-medium">
+              Toque para se conectar ao sistema de despacho EmprataAI.
+            </p>
+          </div>
+        ) : activeDelivery ? (
+          <motion.div 
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="bg-[#121212] rounded-[2.5rem] border border-white/10 overflow-hidden shadow-2xl relative"
+          >
+            {/* Barra de Progresso Animada */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-white/5">
+              <motion.div 
+                initial={{ width: "0%" }} 
+                animate={{ width: "100%" }} 
+                transition={{ duration: 2, repeat: Infinity }} 
+                className="h-full bg-blue-500 shadow-[0_0_10px_#3b82f6]" 
+              />
+            </div>
+
+            {/* Header da Entrega */}
+            <div className="bg-white/5 p-8 border-b border-white/5">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 text-[10px] font-black uppercase tracking-wider">
+                      Em Rota
+                    </span>
+                  </div>
+                  <h2 className="text-3xl font-black text-white">
+                    {activeDelivery.customer?.name || 'Cliente'}
+                  </h2>
+                </div>
+                {activeDelivery.customer?.phone && (
+                  <a 
+                    href={`tel:${activeDelivery.customer.phone}`} 
+                    className="w-12 h-12 bg-green-500 text-black rounded-2xl flex items-center justify-center hover:scale-110 transition-transform shadow-lg shadow-green-500/20"
+                  >
+                    <Phone size={24} />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Informações */}
+            <div className="p-8 space-y-8">
+              {/* Trajeto Visual */}
+              <div className="flex flex-col gap-6 relative">
+                <div className="absolute left-[11px] top-3 bottom-8 w-0.5 bg-white/10" />
+                
+                <div className="flex gap-4 relative z-10">
+                  <div className="w-6 h-6 rounded-full bg-[#121212] border-2 border-white/20 shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-wider mb-1">Coleta</p>
+                    <p className="font-bold text-white">Restaurante</p>
+                  </div>
+                </div>
+                
+                <div className="flex gap-4 relative z-10">
+                  <div className="w-6 h-6 rounded-full bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)] shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-green-500 font-bold uppercase tracking-wider mb-1">Entrega</p>
+                    <p className="text-xl font-bold leading-tight">
+                      {activeDelivery.customer?.address || activeDelivery.deliveryAddress?.street || 'Endereço'}
+                    </p>
+                    {activeDelivery.deliveryAddress?.neighborhood && (
+                      <p className="text-sm text-white/50">{activeDelivery.deliveryAddress.neighborhood}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Ações */}
+              <div className="grid grid-cols-2 gap-4 pt-4">
+                <a 
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(activeDelivery.customer?.address || activeDelivery.deliveryAddress?.street || '')}`}
+                  target="_blank"
+                  className="py-4 bg-[#1a1a1a] rounded-2xl font-bold flex items-center justify-center gap-2 border border-white/10 hover:bg-white/5 active:scale-95 transition-all text-sm"
+                >
+                  <Navigation size={18} className="text-blue-400" /> Navegar
+                </a>
+                <button 
+                  onClick={() => setShowPinModal(true)}
+                  className="py-4 bg-white text-black rounded-2xl font-black flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 transition-all text-sm shadow-xl"
+                >
+                  <CheckCircle size={18} /> FINALIZAR
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        ) : (
+          <div className="flex flex-col items-center justify-center opacity-40">
+            <div className="w-32 h-32 rounded-full border border-dashed border-white/20 flex items-center justify-center mb-6 animate-[spin_10s_linear_infinite]">
+              <Bike size={32} className="text-white" />
+            </div>
+            <h3 className="text-lg font-bold">Procurando corridas...</h3>
+            <p className="text-xs mt-2 text-white/50">Mantenha o app aberto.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Botão Offline */}
+      {isOnline && !activeDelivery && (
+        <div className="p-6">
+          <button 
+            onClick={toggleOnlineStatus} 
+            className="w-full py-4 rounded-2xl border border-red-500/20 text-red-500/60 font-bold text-xs uppercase tracking-widest hover:bg-red-500/10 hover:text-red-500 transition-all"
+          >
+            Encerrar Turno
+          </button>
+        </div>
+      )}
+
+      {/* MODAL PIN DE ENTREGA (4 DÍGITOS) */}
       <AnimatePresence>
-        {isConfirmModalOpen && selectedOrder && (
-          <DeliveryConfirmModal
-            order={selectedOrder}
-            onConfirm={(proofUrl) => handleDeliveryComplete(selectedOrder, proofUrl)}
-            onClose={() => {
-              setIsConfirmModalOpen(false);
-              setSelectedOrder(null);
-            }}
-            loading={loading}
-          />
+        {showPinModal && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-end md:items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ y: 100 }} 
+              animate={{ y: 0 }}
+              className="bg-[#121212] w-full max-w-sm rounded-[2.5rem] border border-white/10 p-8 text-center shadow-2xl"
+            >
+              <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6 border border-white/10">
+                <Lock className="text-white" size={28} />
+              </div>
+              
+              <h3 className="text-2xl font-black text-white mb-2">Confirmação</h3>
+              <p className="text-sm text-white/50 mb-8">
+                Peça o código de <strong>4 dígitos</strong> para o cliente.
+              </p>
+
+              {/* Display PIN */}
+              <div className="flex justify-center gap-3 mb-8">
+                {[0, 1, 2, 3].map((i) => (
+                  <div 
+                    key={i} 
+                    className={`w-12 h-14 rounded-xl border flex items-center justify-center text-2xl font-black transition-all ${
+                      i < deliveryPin.length 
+                        ? 'bg-white text-black border-white scale-110' 
+                        : 'bg-[#0a0a0a] border-white/10 text-white/20'
+                    }`}
+                  >
+                    {deliveryPin[i] || ''}
+                  </div>
+                ))}
+              </div>
+
+              {/* Teclado Numérico */}
+              <div className="grid grid-cols-3 gap-3 mb-6">
+                {[1,2,3,4,5,6,7,8,9].map(n => (
+                  <button 
+                    key={n} 
+                    onClick={() => deliveryPin.length < 4 && setDeliveryPin(p => p + n)} 
+                    className="py-4 bg-[#1a1a1a] rounded-xl font-bold text-xl hover:bg-white/10 active:scale-95 transition-all"
+                  >
+                    {n}
+                  </button>
+                ))}
+                <div />
+                <button 
+                  onClick={() => deliveryPin.length < 4 && setDeliveryPin(p => p + '0')} 
+                  className="py-4 bg-[#1a1a1a] rounded-xl font-bold text-xl hover:bg-white/10 active:scale-95 transition-all"
+                >
+                  0
+                </button>
+                <button 
+                  onClick={() => setDeliveryPin(p => p.slice(0, -1))} 
+                  className="py-4 bg-red-500/10 text-red-400 rounded-xl flex items-center justify-center active:scale-95 transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <button 
+                  onClick={handleVerifyPin}
+                  disabled={deliveryPin.length < 4 || isLoading}
+                  className="w-full py-4 bg-white text-black font-black rounded-xl text-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
+                >
+                  {isLoading ? <Loader2 className="animate-spin mx-auto"/> : 'VALIDAR ENTREGA'}
+                </button>
+                <button 
+                  onClick={() => { setShowPinModal(false); setDeliveryPin(''); }} 
+                  className="w-full py-3 text-xs font-bold text-white/40 hover:text-white"
+                >
+                  CANCELAR
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// LOGIN COMPONENT
-// ══════════════════════════════════════════════════════════════════
-
-function DriverLogin({ onLogin }: { onLogin: (driver: Driver) => void }) {
-  const [pin, setPin] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleLogin = async () => {
-    if (pin.length !== 4) {
-      setError('PIN deve ter 4 dígitos');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-
-    try {
-      const driversQuery = query(
-        collection(db, 'drivers'),
-        where('pin', '==', pin),
-        where('active', '==', true)
-      );
-
-      const snapshot = await getDocs(driversQuery);
-
-      if (snapshot.empty) {
-        setError('PIN inválido');
-        setPin('');
-        // Vibrate on error
-        if (navigator.vibrate) navigator.vibrate(200);
-      } else {
-        const driver = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Driver;
-        
-        // Update status
-        await updateDoc(doc(db, 'drivers', driver.id), {
-          currentStatus: 'available'
-        });
-
-        localStorage.setItem('driverSession', JSON.stringify(driver));
-        onLogin(driver);
-        toast.success(`Bem-vindo, ${driver.name}!`);
-      }
-    } catch (err) {
-      console.error(err);
-      setError('Erro ao fazer login');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6">
-      <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center mb-6">
-        <Bike className="w-10 h-10 text-green-400" />
-      </div>
-
-      <h1 className="text-2xl font-black mb-2">Modo Entregador</h1>
-      <p className="text-white/40 mb-8">Digite seu PIN de 4 dígitos</p>
-
-      {/* PIN Input */}
-      <div className="flex gap-3 mb-6">
-        {[0, 1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className={`w-14 h-14 rounded-xl border-2 flex items-center justify-center text-2xl font-black ${
-              pin[i] ? 'border-green-500 bg-green-500/20' : 'border-white/20 bg-white/5'
-            }`}
-          >
-            {pin[i] || ''}
-          </div>
-        ))}
-      </div>
-
-      {error && (
-        <p className="text-red-400 text-sm mb-4 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4" />
-          {error}
-        </p>
-      )}
-
-      {/* Numpad */}
-      <div className="grid grid-cols-3 gap-3 w-full max-w-xs mb-6">
-        {[1, 2, 3, 4, 5, 6, 7, 8, 9, null, 0, 'del'].map((num, i) => (
-          <button
-            key={i}
-            disabled={num === null}
-            onClick={() => {
-              if (num === 'del') {
-                setPin(pin.slice(0, -1));
-              } else if (typeof num === 'number' && pin.length < 4) {
-                setPin(pin + num);
-              }
-            }}
-            className={`h-16 rounded-xl font-bold text-2xl transition-all ${
-              num === null
-                ? 'invisible'
-                : num === 'del'
-                ? 'bg-red-500/20 text-red-400'
-                : 'bg-white/10 hover:bg-white/20 active:scale-95'
-            }`}
-          >
-            {num === 'del' ? '⌫' : num}
-          </button>
-        ))}
-      </div>
-
-      <button
-        onClick={handleLogin}
-        disabled={pin.length !== 4 || loading}
-        className="w-full max-w-xs py-4 bg-green-500 rounded-xl font-black text-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-      >
-        {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : 'ENTRAR'}
-      </button>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// DELIVERY CONFIRMATION MODAL
-// ══════════════════════════════════════════════════════════════════
-
-interface DeliveryConfirmModalProps {
-  order: Order;
-  onConfirm: (proofUrl?: string) => void;
-  onClose: () => void;
-  loading: boolean;
-}
-
-function DeliveryConfirmModal({ order, onConfirm, onClose, loading }: DeliveryConfirmModalProps) {
-  const [mode, setMode] = useState<'pin' | 'photo'>('pin');
-  const [enteredPin, setEnteredPin] = useState('');
-  const [pinError, setPinError] = useState(false);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Validate PIN
-  const handlePinSubmit = () => {
-    if (enteredPin === order.deliveryPin) {
-      onConfirm();
-    } else {
-      setPinError(true);
-      setEnteredPin('');
-      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-      setTimeout(() => setPinError(false), 1000);
-    }
-  };
-
-  // Handle photo capture
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setPhotoFile(file);
-      setPhotoPreview(URL.createObjectURL(file));
-    }
-  };
-
-  // Upload photo and confirm
-  const handlePhotoSubmit = async () => {
-    if (!photoFile) {
-      toast.error('Tire uma foto do pacote');
-      return;
-    }
-
-    setUploading(true);
-    try {
-      // For now, we'll skip actual upload and just confirm
-      // In production, upload to Firebase Storage
-      const mockUrl = `proof_${order.id}_${Date.now()}.jpg`;
-      onConfirm(mockUrl);
-    } catch (error) {
-      toast.error('Erro ao enviar foto');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[100] bg-black"
-    >
-      {/* Header */}
-      <div className="sticky top-0 bg-black border-b border-white/10 px-4 py-3 flex items-center justify-between">
-        <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl">
-          <X className="w-6 h-6" />
-        </button>
-        <h2 className="font-bold">Confirmar Entrega</h2>
-        <div className="w-10" />
-      </div>
-
-      {mode === 'pin' ? (
-        <div className="p-6 flex flex-col items-center">
-          <h3 className="text-xl font-bold mb-2">Digite o Código do Cliente</h3>
-          <p className="text-white/40 text-sm mb-8 text-center">
-            Peça o código de 4 dígitos que apareceu na confirmação do pedido
-          </p>
-
-          {/* PIN Display */}
-          <div className={`flex gap-3 mb-6 ${pinError ? 'animate-shake' : ''}`}>
-            {[0, 1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className={`w-16 h-16 rounded-xl border-2 flex items-center justify-center text-3xl font-black transition-all ${
-                  pinError 
-                    ? 'border-red-500 bg-red-500/20' 
-                    : enteredPin[i] 
-                      ? 'border-green-500 bg-green-500/20' 
-                      : 'border-white/20 bg-white/5'
-                }`}
-              >
-                {enteredPin[i] || ''}
-              </div>
-            ))}
-          </div>
-
-          {pinError && (
-            <p className="text-red-400 font-bold mb-4">Código Inválido!</p>
-          )}
-
-          {/* Numpad */}
-          <div className="grid grid-cols-3 gap-3 w-full max-w-xs mb-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, null, 0, 'del'].map((num, i) => (
-              <button
-                key={i}
-                disabled={num === null || loading}
-                onClick={() => {
-                  if (num === 'del') {
-                    setEnteredPin(enteredPin.slice(0, -1));
-                  } else if (typeof num === 'number' && enteredPin.length < 4) {
-                    const newPin = enteredPin + num;
-                    setEnteredPin(newPin);
-                    // Auto-submit on 4 digits
-                    if (newPin.length === 4) {
-                      setTimeout(() => {
-                        if (newPin === order.deliveryPin) {
-                          onConfirm();
-                        } else {
-                          setPinError(true);
-                          setEnteredPin('');
-                          if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-                          setTimeout(() => setPinError(false), 1000);
-                        }
-                      }, 100);
-                    }
-                  }
-                }}
-                className={`h-16 rounded-xl font-bold text-2xl transition-all ${
-                  num === null
-                    ? 'invisible'
-                    : num === 'del'
-                    ? 'bg-red-500/20 text-red-400'
-                    : 'bg-white/10 hover:bg-white/20 active:scale-95'
-                }`}
-              >
-                {num === 'del' ? '⌫' : num}
-              </button>
-            ))}
-          </div>
-
-          {/* Alternative: Photo proof */}
-          <button
-            onClick={() => setMode('photo')}
-            className="text-white/40 text-sm underline"
-          >
-            Não tenho o código / Deixar na Portaria
-          </button>
-        </div>
-      ) : (
-        <div className="p-6 flex flex-col items-center">
-          <h3 className="text-xl font-bold mb-2">Comprovante de Entrega</h3>
-          <p className="text-white/40 text-sm mb-6 text-center">
-            Tire uma foto do pacote no local de entrega
-          </p>
-
-          {/* Photo Preview */}
-          <div 
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full aspect-square max-w-xs bg-white/5 border-2 border-dashed border-white/20 rounded-2xl flex flex-col items-center justify-center mb-6 overflow-hidden cursor-pointer"
-          >
-            {photoPreview ? (
-              <img src={photoPreview} className="w-full h-full object-cover" />
-            ) : (
-              <>
-                <Camera className="w-16 h-16 text-white/20 mb-4" />
-                <p className="text-white/40">Toque para tirar foto</p>
-              </>
-            )}
-          </div>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handlePhotoChange}
-            className="hidden"
-          />
-
-          <button
-            onClick={handlePhotoSubmit}
-            disabled={!photoFile || uploading}
-            className="w-full max-w-xs py-4 bg-green-500 rounded-xl font-black text-xl disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {uploading ? (
-              <Loader2 className="w-6 h-6 animate-spin" />
-            ) : (
-              <>
-                <CheckCircle className="w-6 h-6" />
-                CONFIRMAR COM FOTO
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={() => setMode('pin')}
-            className="mt-4 text-white/40 text-sm underline"
-          >
-            Voltar para código
-          </button>
-        </div>
-      )}
-
-      {/* Loading Overlay */}
-      {loading && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
-          <Loader2 className="w-12 h-12 animate-spin text-green-400" />
-        </div>
-      )}
-
-      <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          25% { transform: translateX(-10px); }
-          75% { transform: translateX(10px); }
-        }
-        .animate-shake {
-          animation: shake 0.3s ease-in-out;
-        }
-      `}</style>
-    </motion.div>
   );
 }

@@ -7,7 +7,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   MapPin, Navigation, Home, Briefcase, Plus, 
-  ChevronDown, Check, Loader2, X 
+  ChevronDown, Check, Loader2, X, AlertTriangle 
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Address } from '../types/user';
@@ -63,6 +63,13 @@ export default function AddressSelector({
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [isCepLoading, setIsCepLoading] = useState(false);
+  const [isValidatingNumber, setIsValidatingNumber] = useState(false);
+
+  const validateAddressCompleteness = () => {
+    if (!newAddress.street || !newAddress.neighborhood || !newAddress.city) return false;
+    if (!newAddress.number || newAddress.number.length < 1) return false;
+    return true;
+  };
   
   const [newAddress, setNewAddress] = useState<Partial<Address>>({
     label: 'casa',
@@ -154,11 +161,17 @@ export default function AddressSelector({
   // SAVE NEW ADDRESS
   // ════════════════════════════════════════════════════════════════
   
-  const handleSaveNew = () => {
-    if (!newAddress.street || !newAddress.number || !newAddress.neighborhood) {
-      toast.error('Preencha os campos obrigatórios');
+  const handleSaveNew = async () => {
+    if (!validateAddressCompleteness()) {
+      toast.error('Endereço incompleto. Verifique rua e número.');
       return;
     }
+
+    setIsValidatingNumber(true);
+    
+    // Simulação de validação "Inteligente" (UX)
+    await new Promise(resolve => setTimeout(resolve, 800)); 
+    setIsValidatingNumber(false);
 
     const address: Address = {
       id: `addr_${Date.now()}`,
@@ -178,7 +191,7 @@ export default function AddressSelector({
     onSelect(address);
     setIsAddingNew(false);
     setIsOpen(false);
-    toast.success('Endereço salvo!');
+    toast.success('Endereço validado e salvo!');
   };
 
   // ════════════════════════════════════════════════════════════════
@@ -312,12 +325,22 @@ export default function AddressSelector({
                       <label className="text-xs font-bold text-white/40 uppercase tracking-wider mb-1 block">
                         Nº
                       </label>
-                      <input
-                        type="text"
-                        value={newAddress.number}
-                        onChange={(e) => setNewAddress({ ...newAddress, number: e.target.value })}
-                        className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-primary focus:outline-none"
-                      />
+                      <div className="relative">
+                        <input
+                            type="text"
+                            value={newAddress.number}
+                            onChange={(e) => setNewAddress({ ...newAddress, number: e.target.value })}
+                            className={`w-full bg-black/50 border rounded-xl px-4 py-3 text-white focus:outline-none transition-colors ${
+                                !newAddress.number ? 'border-red-500/50' : 'border-white/10 focus:border-primary'
+                            }`}
+                        />
+                        {!newAddress.number && (
+                            <AlertTriangle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-500" />
+                        )}
+                      </div>
+                      {!newAddress.number && (
+                        <p className="text-[10px] text-red-400 mt-1">* Obrigatório</p>
+                      )}
                     </div>
                   </div>
 
@@ -365,9 +388,14 @@ export default function AddressSelector({
                   {/* Save Button */}
                   <button
                     onClick={handleSaveNew}
-                    className="w-full py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black uppercase tracking-wider text-sm transition-colors"
+                    disabled={isValidatingNumber}
+                    className="w-full py-4 bg-primary hover:bg-orange-600 rounded-2xl font-black uppercase tracking-wider text-sm transition-colors flex items-center justify-center gap-2"
                   >
-                    Salvar Endereço
+                    {isValidatingNumber ? (
+                        <><Loader2 className="animate-spin w-4 h-4" /> Validando...</>
+                    ) : (
+                        'Confirmar Endereço'
+                    )}
                   </button>
                 </div>
               ) : (

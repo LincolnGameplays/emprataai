@@ -4,8 +4,7 @@
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { AIOrganizeResponse } from "../types/menu";
-import type { AISmartOrganizeResponse } from "../types/orders";
+import type { AIOrganizeResponse, AISmartOrganizeResponse } from "../types/menu";
 
 // Initialize API with environment key
 const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_API_KEY || "");
@@ -249,3 +248,75 @@ Retorne JSON: { "itemName": "Nome", "pitch": "Frase de venda" }`;
   }
 }
 
+
+export async function parseMenuFromText(text: string) {
+  const prompt = `
+    Analise o texto de cardápio abaixo e extraia os itens em formato JSON estruturado.
+    O texto pode estar bagunçado. Tente identificar Categoria, Nome do Prato, Descrição e Preço.
+    
+    Retorne APENAS um JSON com esta estrutura:
+    {
+      "categories": [
+        {
+          "title": "Nome da Categoria",
+          "items": [
+            {
+              "title": "Nome do Item",
+              "description": "Descrição (se houver)",
+              "price": 0.00 (number)
+            }
+          ]
+        }
+      ]
+    }
+
+    TEXTO DO CARDÁPIO:
+    ${text}
+  `;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const result = await model.generateContent(prompt);
+    const response = result.response.text();
+    // Limpeza básica para garantir JSON válido
+    const jsonStr = response.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error("Erro ao processar cardápio:", error);
+    throw new Error("Não foi possível ler o cardápio. Tente formatar melhor o texto.");
+  }
+}
+export async function semanticSearch(userQuery: string, menuItems: any[]) {
+  // Cria um "mini índice" dos itens apenas com nome e descrição para economizar tokens
+  const simplifiedMenu = menuItems.map(i => `${i.id}: ${i.title} (${i.description})`).join('\n');
+
+  // Usa logicModel importado de googleAi.ts (que precisamos importar aqui se ainda não estiver, mas vou usar o genAI configurado neste arquivo para manter consistência ou usar o logicModel)
+  // O arquivo já tem genAI configurado com GEMINI-1.5-PRO. O prompt pede logicModel.
+  // Vou usar o modelo padrão deste arquivo (AI_MODEL) que é o 1.5 Pro, que é suficiente e mantém o padrão do arquivo.
+  const model = genAI.getGenerativeModel({ 
+      model: AI_MODEL,
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+  });
+
+  const prompt = `
+    Um cliente buscou: "${userQuery}".
+    Abaixo está o cardápio.
+    Retorne uma lista JSON com os IDs dos 3 itens que melhor combinam com a INTENÇÃO do cliente (ex: se ele pediu "leve", procure saladas ou grelhados).
+    
+    Cardápio:
+    ${simplifiedMenu}
+
+    Retorne APENAS: ["id1", "id2", "id3"]
+  `;
+
+  try {
+    const result = await model.generateContent(prompt);
+    const ids = JSON.parse(result.response.text());
+    return ids; // Array de strings
+  } catch (e) {
+    console.error(e);
+    return [];
+  }
+}

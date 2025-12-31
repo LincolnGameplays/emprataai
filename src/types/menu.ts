@@ -61,6 +61,20 @@ export interface AIOrganizeResponse {
   suggestedHighlights: string[];
 }
 
+export interface AISmartOrganizeResponse {
+  categories: {
+    name: string;
+    items: string[];
+  }[];
+  suggestedHighlights: string[];
+  orderBumps: {
+    itemName: string;
+    reason: string;
+    suggestedPrice: number;
+  }[];
+  improvedDescriptions: Record<string, string>;
+}
+
 // ══════════════════════════════════════════════════════════════════
 // FORM DATA TYPES
 // ══════════════════════════════════════════════════════════════════

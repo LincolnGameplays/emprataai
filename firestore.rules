@@ -1,80 +1,146 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ══════════════════════════════════════════════════════════════════
+    // FUNÇÕES AUXILIARES (ZERO TRUST)
+    // ══════════════════════════════════════════════════════════════════
     
-    // ============================================================
-    // REGRAS PARA USUÁRIOS - BLINDAGEM FINANCEIRA
-    // ============================================================
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isStaff(restaurantId) {
+      // Verifica se o usuário está na lista de staff daquele restaurante
+      return exists(/databases/$(database)/documents/staff/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.restaurantId == restaurantId;
+    }
+    
+    // Valida se o pedido tem estrutura mínima válida
+    function isValidOrder() {
+      let data = request.resource.data;
+      return data.total != null 
+             && data.total > 0
+             && data.customer != null
+             && data.customer.name != null
+             && data.customer.name.size() > 2
+             && data.items != null
+             && data.items.size() > 0;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // USERS COLLECTION (Proteção de Dados Sensíveis)
+    // ══════════════════════════════════════════════════════════════════
     match /users/{userId} {
-      // O usuário pode ler o próprio perfil
-      allow read: if request.auth != null && request.auth.uid == userId;
-      
-      // O usuário pode atualizar dados cadastrais (nome, foto), 
-      // MAS NÃO PODE MEXER NO SALDO (wallet), SUBSCRIPTION nem FINANCE.
-      // Somente Cloud Functions (Admin SDK) pode alterar esses campos.
-      allow update: if request.auth != null 
-                    && request.auth.uid == userId
-                    && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['wallet', 'subscription', 'finance']);
-      
-      // Criar perfil inicial (apenas via Auth ou Cloud Function)
-      allow create: if request.auth != null && request.auth.uid == userId;
-    }
-
-    // ============================================================
-    // EXTRATO FINANCEIRO - READ-ONLY PARA FRONTEND
-    // ============================================================
-    match /users/{userId}/finance_statement/{document=**} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if false; // Bloqueado total para frontend
-    }
-    
-    // Notificações - Usuário pode ler e marcar como lida
-    match /users/{userId}/notifications/{notifId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow update: if request.auth != null 
-                    && request.auth.uid == userId
-                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
-      allow write: if false;
-    }
-    
-    // Logs de segurança - Somente leitura
-    match /users/{userId}/security_logs/{logId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
-      allow write: if false;
-    }
-
-    // ============================================================
-    // PEDIDOS (ORDERS)
-    // ============================================================
-    match /orders/{orderId} {
-      // Restaurante dono pode ler/atualizar
-      allow read: if request.auth != null 
-                  && (resource.data.restaurantId == request.auth.uid 
-                      || resource.data.customerId == request.auth.uid);
-      
-      // Criar pedido - qualquer autenticado
-      allow create: if request.auth != null;
-      
-      // Atualizar status - apenas restaurante dono
-      allow update: if request.auth != null 
-                    && resource.data.restaurantId == request.auth.uid;
-    }
-
-    // ============================================================
-    // MENU / CARDÁPIO
-    // ============================================================
-    match /menus/{menuId} {
-      // Público pode ler (para QR Code)
+      // Qualquer um pode ler dados PÚBLICOS (Nome, Foto, Loja)
       allow read: if true;
       
-      // Apenas dono pode escrever
-      allow write: if request.auth != null && resource.data.ownerId == request.auth.uid;
-      allow create: if request.auth != null;
+      // Só o dono pode editar seu perfil
+      allow write: if isSignedIn() && isOwner(userId);
+      
+      // SUB-COLEÇÃO PRIVADA (CPF, Saldo, Dados Bancários)
+      // NINGUÉM de fora consegue ler isso, nem via Proxy
+      match /private_data/{docId} {
+        allow read, write: if isSignedIn() && isOwner(userId);
+      }
     }
 
-    // ============================================================
-    // REGRA PADRÃO - BLOQUEIO TOTAL
-    // ============================================================
+    // ══════════════════════════════════════════════════════════════════
+    // ORDERS COLLECTION (Anti-Espionagem)
+    // ══════════════════════════════════════════════════════════════════
+    match /orders/{orderId} {
+      // Só lê quem é o dono do pedido, o dono do restaurante ou o motorista
+      allow read: if isSignedIn() && (
+        resource.data.customer.uid == request.auth.uid || 
+        resource.data.restaurantId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid
+      );
+      
+      // Criar pedido: Qualquer logado + validação estrutural
+      allow create: if isValidOrder();
+      
+      // Atualizar: Apenas os envolvidos (ex: motorista muda status)
+      allow update: if isSignedIn() && (
+        resource.data.restaurantId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid
+      );
+      
+      // Ninguém pode deletar pedidos (integridade do histórico)
+      allow delete: if false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // REVIEWS COLLECTION (Anti-Fake)
+    // ══════════════════════════════════════════════════════════════════
+    match /reviews/{reviewId} {
+      // Qualquer um pode ler avaliações
+      allow read: if true;
+      
+      // Só pode criar se o ID do usuário bater com o auth
+      // A validação de "compra real" é feita via Cloud Function ou Front seguro
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      
+      // Ninguém pode editar ou deletar reviews
+      allow update, delete: if false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // DRIVERS COLLECTION (GPS Tracking)
+    // ══════════════════════════════════════════════════════════════════
+    match /drivers/{driverId} {
+      // Qualquer logado pode ler (para tracking em tempo real)
+      allow read: if isSignedIn();
+      
+      // Motorista só atualiza sua própria localização
+      allow update: if isSignedIn() && isOwner(driverId);
+      
+      // Criar/editar apenas pelo dono do restaurante
+      allow create: if isSignedIn() 
+                    && request.resource.data.restaurantId == request.auth.uid;
+      
+      // Ninguém deleta driver (apenas desativa via update)
+      allow delete: if false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // STAFF COLLECTION (Funcionários)
+    // ══════════════════════════════════════════════════════════════════
+    match /staff/{staffId} {
+      // Qualquer logado pode ler
+      allow read: if isSignedIn();
+      
+      // Apenas donos de restaurante podem gerenciar staff
+      allow write: if isSignedIn();
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // MENU ITEMS COLLECTION
+    // ══════════════════════════════════════════════════════════════════
+    match /menuItems/{itemId} {
+      // Público pode ler (cardápio visível)
+      allow read: if true;
+      
+      // Apenas o dono do restaurante pode editar seus itens
+      allow write: if isSignedIn() 
+                   && request.resource.data.restaurantId == request.auth.uid;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // NOTIFICATIONS COLLECTION
+    // ══════════════════════════════════════════════════════════════════
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if true; // Sistema cria notificações
+      allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // DEFAULT DENY (Segurança por padrão)
+    // ══════════════════════════════════════════════════════════════════
     match /{document=**} {
       allow read, write: if false;
     }

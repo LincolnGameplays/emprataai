@@ -290,6 +290,23 @@ export function useAuth() {
     }
   };
 
+  // ============================================
+  // SWITCH ROLE (DUAL PERSONA)
+  // ============================================
+  const switchRole = async (targetRole: 'OWNER' | 'CUSTOMER') => {
+    if (!user) return;
+    
+    // Save preference
+    localStorage.setItem('activeRole', targetRole);
+    
+    // Force redirect
+    if (targetRole === 'OWNER') {
+      window.location.href = '/dashboard';
+    } else {
+      window.location.href = '/delivery';
+    }
+  };
+
   return {
     user,
     userData,
@@ -300,6 +317,7 @@ export function useAuth() {
     signUp,
     signOut,
     refreshUser,
+    switchRole,
     isAuthenticated: !!user,
     isPro: userData?.plan?.toLowerCase() === 'pro' || userData?.plan?.toLowerCase() === 'starter'
   };

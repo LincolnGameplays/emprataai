@@ -64,6 +64,11 @@ export {onOrderCreated} from "./orders/notifications";
 // export {acceptBatchRoute, getAvailableBatchRoutes} from "./logistics/batchActions";
 
 // ============================================================================
+// SEGURANÇA (Validação de Endereço)
+// ============================================================================
+export {verifyAddress} from "./security/addressCheck";
+
+// ============================================================================
 // FUNÇÃO MÍNIMA (Health Check)
 // ============================================================================
 

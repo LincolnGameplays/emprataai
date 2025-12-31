@@ -133,6 +133,8 @@ export interface Order {
   
   // Driver
   driverId?: string;
+  driverName?: string; // Nome do motorista
+  deliveryPin?: string; // PIN de segurança
   dispatchedAt?: Date;
   deliveredAt?: Date;
   

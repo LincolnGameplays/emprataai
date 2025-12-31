@@ -223,3 +223,57 @@ Responda APENAS com o texto da mensagem, sem aspas nem explicações.`;
   console.log("✅ [Business AI] Campanha gerada!");
   return cleanText;
 }
+// ══════════════════════════════════════════════════════════════════
+// D. PROFIT GUARDIAN - "Auditoria Financeira"
+// Analyzes menu margins and financial health
+// ══════════════════════════════════════════════════════════════════
+
+export interface MenuAuditResult {
+  dangerousItems: {
+    name: string;
+    currentMargin: number;
+    suggestion: string;
+    suggestedPrice: number;
+  }[];
+  overallHealth: number; // 0 a 100
+}
+
+export async function auditMenuMargins(items: any[]) {
+  const itemsData = items.map(i => ({
+    name: i.title,
+    price: i.price,
+    cost: i.costPrice || (i.price * 0.4) // Se não tiver custo, assume 40% (pior caso)
+  }));
+
+  const model = genAI.getGenerativeModel({ 
+    model: LOGIC_MODEL,
+    generationConfig: {
+      responseMimeType: "application/json"
+    }
+  });
+
+  const prompt = `
+    Atue como um CFO de Restaurante. Analise estes itens do cardápio:
+    ${JSON.stringify(itemsData)}
+
+    REGRAS:
+    1. Calcule a margem bruta: (Preço - Custo) / Preço.
+    2. Identifique itens com margem < 30% (Perigo).
+    3. Para os itens perigosos, sugira um novo preço para atingir 45% de margem.
+    4. Dê uma nota de 0 a 100 para a saúde financeira do menu.
+
+    Retorne JSON:
+    {
+      "dangerousItems": [{ "name": "...", "currentMargin": 0.25, "suggestion": "Aumentar preço ou reduzir porção de proteína", "suggestedPrice": 0.00 }],
+      "overallHealth": 85
+    }
+  `;
+
+  try {
+    const result = await model.generateContent(prompt);
+    return JSON.parse(result.response.text());
+  } catch (error) {
+    console.error("Erro na auditoria:", error);
+    return { dangerousItems: [], overallHealth: 0 };
+  }
+}

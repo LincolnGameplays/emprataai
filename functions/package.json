@@ -22,7 +22,7 @@
     "firebase-functions": "^7.0.2",
     "form-data": "^4.0.5",
     "string-similarity": "^4.0.4",
-    "uuid": "^13.0.0"
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "@types/string-similarity": "^4.0.2",

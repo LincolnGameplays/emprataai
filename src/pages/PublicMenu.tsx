@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles, CloudRain, Dumbbell, Zap, Moon, MapPin, Clock } from 'lucide-react';
+import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles, CloudRain, Dumbbell, Zap, Moon, MapPin, Clock, ArrowLeft, Star } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 import { collection, query, where, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
@@ -16,6 +16,8 @@ import { ProductStories } from '../components/ProductStories';
 import { Menu } from '../types/menu';
 import { useRestaurantMetrics } from '../hooks/useRestaurantMetrics';
 import { calculateDistance, formatDistance } from '../utils/geo';
+import { predictDeliveryTime, type DeliveryPrediction } from '../services/logisticsAi';
+import { Loader2 } from 'lucide-react';
 
 // Interfaces simplificadas para o componente
 // Interfaces simplificadas para o componente
@@ -41,6 +43,7 @@ interface OrderSuccess {
 export default function PublicMenu() {
   const { slug } = useParams();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const tableId = searchParams.get('table');
   const [loading, setLoading] = useState(true);
   const [restaurant, setRestaurant] = useState<any>(null);
@@ -61,10 +64,19 @@ export default function PublicMenu() {
   // Order Success State (with delivery PIN)
   const [orderSuccess, setOrderSuccess] = useState<OrderSuccess | null>(null);
 
+  // Search & Filter State
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isSearchingAI, setIsSearchingAI] = useState(false);
+  const [filteredMenuItems, setFilteredMenuItems] = useState<MenuItem[]>([]);
+  
   // Real Data State
   const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [distance, setDistance] = useState<string | null>(null);
   const { metrics, loading: metricsLoading } = useRestaurantMetrics(restaurant?.ownerId);
+  
+  // AI Delivery Prediction State
+  const [deliveryEstimate, setDeliveryEstimate] = useState<DeliveryPrediction | null>(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
   
   // 1. Pegar Geolocalização Real do Cliente
   useEffect(() => {
@@ -88,6 +100,32 @@ export default function PublicMenu() {
       setDistance(formatDistance(dist));
     }
   }, [userLocation, restaurant]);
+
+  // 3. AI Delivery Time Prediction
+  useEffect(() => {
+    const calculateEstimate = async () => {
+      if (!restaurant?.ownerId || !userLocation) return;
+      
+      const storeLocation = restaurant.location || restaurant.marketplace?.location;
+      if (!storeLocation?.lat) return;
+      
+      setEstimateLoading(true);
+      try {
+        const prediction = await predictDeliveryTime({
+          restaurantId: restaurant.ownerId,
+          storeLocation: { lat: storeLocation.lat, lng: storeLocation.lng },
+          userLocation
+        });
+        setDeliveryEstimate(prediction);
+      } catch (e) {
+        console.error('Prediction error:', e);
+      } finally {
+        setEstimateLoading(false);
+      }
+    };
+    
+    calculateEstimate();
+  }, [restaurant, userLocation]);
   
   // Neuro-Copywriting State
   const [currentVibe, setCurrentVibe] = useState<UserVibe>('standard');
@@ -148,18 +186,18 @@ export default function PublicMenu() {
         if (dynamicMenu) {
             setProcessedMenu(dynamicMenu);
             
-            // Extract stories (Highlights from dynamic menu)
-            // We need to map items to include category for the flattened view
+            // Extract stories
             const allItemsValues: MenuItem[] = dynamicMenu.categories.flatMap((c: any) => 
               c.items.map((i: any) => ({ ...i, category: c.title }))
             );
 
             setStories(allItemsValues.filter(i => i.isHighlight).slice(0, 10)); // Top 10 highlights
 
-            // Populate flat items for other uses
+            // Populate flat items
             setMenuItems(allItemsValues);
+            setFilteredMenuItems(allItemsValues); // Initialize filtered items
 
-            // Update categories based on dynamic order
+            // Update categories
             setCategories(['Todos', ...dynamicMenu.categories.map(c => c.title)]);
         } else {
              const items: MenuItem[] = [];
@@ -173,6 +211,7 @@ export default function PublicMenu() {
              });
      
              setMenuItems(items);
+             setFilteredMenuItems(items); // Initialize filtered items
              setCategories(['Todos', ...Array.from(cats)]);
         }
       } catch (error) {
@@ -189,32 +228,47 @@ export default function PublicMenu() {
   useEffect(() => {
     if (!restaurant) return;
     
-    // START: Filter logic
-    let filtered = restaurant; 
+    // Simplification: just reset visible items to full menu on vibe change, 
+    // real logic can be complex re-sorting.
+    // For now we assume menuItems contains all items we want to show.
     
-    // We need to re-apply dynamic sorting to the filtered result ideally, 
-    // or just filter the already dynamic menu.
-    // For simplicity, let's filter the originally loaded menu and re-dynamic it, 
-    // or just filter the items visible. 
-    
-    // Actually, `filterMenuByVibe` takes a Menu.
-    const vibeMenu = filterMenuByVibe(restaurant, currentVibe);
-    const sortedVibeMenu = getDynamicMenu(vibeMenu);
-    
-    if (sortedVibeMenu) {
-        setProcessedMenu(sortedVibeMenu);
-        const allItems = sortedVibeMenu.categories.flatMap((c: any) => c.items);
-        setMenuItems(allItems);
-        
-        // Update tabs if categories become empty? Maybe keep all.
-        // Let's keep distinct categories from the filtered result
-        const validCats = ['Todos', ...sortedVibeMenu.categories.map((c: any) => c.title)];
-        setCategories(validCats);
-        if (!validCats.includes(activeCategory)) setActiveCategory('Todos');
-    }
-    // END: Filter logic
-
   }, [currentVibe, restaurant]);
+
+  // Semantic Search Handler
+  const handleSearch = async (term: string) => {
+    setSearchTerm(term);
+    
+    if (!term) {
+      setFilteredMenuItems(menuItems);
+      return;
+    }
+
+    if (term.length < 4) {
+      const simpleFilter = menuItems.filter(i => i.title.toLowerCase().includes(term.toLowerCase()));
+      setFilteredMenuItems(simpleFilter);
+      return;
+    }
+
+    setIsSearchingAI(true);
+    try {
+      // Lazy import to avoid circular dependencies if any
+      const { semanticSearch } = await import('../services/menuAi');
+      const matchedIds = await semanticSearch(term, menuItems);
+      
+      if (matchedIds.length > 0) {
+        const aiItems = menuItems.filter(i => matchedIds.includes(i.id));
+        setFilteredMenuItems(aiItems);
+        toast.success('IA: Encontrei pratos perfeitos para você!', { icon: '🤖' });
+      } else {
+        const simpleFilter = menuItems.filter(i => i.title.toLowerCase().includes(term.toLowerCase()));
+        setFilteredMenuItems(simpleFilter);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSearchingAI(false);
+    }
+  };
 
   // DEEP LINK HANDLER
   useEffect(() => {
@@ -269,10 +323,33 @@ export default function PublicMenu() {
 
   const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
 
-  // Final Checkout
+  // Final Checkout with Anti-Fraud
   const handleCheckoutFinal = async (paymentData: any) => {
     try {
       setLoading(true);
+      const MAX_DELIVERY_RADIUS_KM = 15; 
+
+      // 1. Verificação de Distância (Geo-Fencing)
+      if (userLocation && restaurant?.location?.lat) {
+        const distanceKm = calculateDistance(
+          userLocation.lat, userLocation.lng, 
+          restaurant.location.lat, restaurant.location.lng
+        ); 
+        
+        if (distanceKm > MAX_DELIVERY_RADIUS_KM) {
+          toast.error(`Desculpe, não entregamos neste local (${distanceKm}km). Limite: ${MAX_DELIVERY_RADIUS_KM}km.`);
+          setLoading(false);
+          return; // BLOQUEIA O PEDIDO
+        }
+      }
+
+      // 2. Verificação de Valor Alto (Anti-Golpe)
+      if (cartTotal > 300 && paymentData.paymentMethod === 'CASH') {
+        toast.error("Para pedidos acima de R$ 300, apenas pagamento via Pix ou Cartão Online.");
+        setLoading(false);
+        return; // BLOQUEIA PAGAMENTO NA ENTREGA PARA VALORES ALTOS
+      }
+
       const deliveryPin = Math.floor(1000 + Math.random() * 9000).toString();
       
       const orderRef = await addDoc(collection(db, 'orders'), {
@@ -336,6 +413,19 @@ export default function PublicMenu() {
              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
              {tableId ? `Mesa ${tableId}` : 'Delivery Online'}
            </div>
+           
+           {/* SEARCH BAR (New) */}
+           <div className="relative w-full max-w-xs mx-auto md:mr-0 z-50">
+             <input 
+                 value={searchTerm}
+                 onChange={(e) => handleSearch(e.target.value)} 
+                 placeholder="Ex: 'Jantar romântico'..."
+                 className="w-full bg-black/40 backdrop-blur-md border border-white/10 rounded-full py-2 pl-10 pr-4 text-xs text-white placeholder-white/50 focus:border-primary focus:outline-none transition-all"
+             />
+             <Search className="absolute left-3 top-2.5 w-4 h-4 text-white/40" />
+             {isSearchingAI && <Sparkles className="absolute right-3 top-2.5 w-4 h-4 text-purple-400 animate-pulse" />}
+           </div>
+
         </div>
         <div className="absolute bottom-0 left-0 p-8 z-20 w-full max-w-4xl mx-auto">
            {/* TAGS REAIS */}
@@ -366,7 +456,25 @@ export default function PublicMenu() {
             {restaurant?.name}
           </motion.h1>
           <div className="flex items-center gap-4 text-sm font-bold text-white/50">
-             <span className="flex items-center gap-1"><Clock size={16} /> 30-45 min</span>
+             {/* AI Delivery Estimate */}
+             <div className="flex items-center gap-2">
+               {estimateLoading ? (
+                 <><Loader2 size={14} className="animate-spin" /> Calculando...</>
+               ) : deliveryEstimate ? (
+                 <div className="flex flex-col">
+                   <span className="flex items-center gap-1 text-white">
+                     <Clock size={14} /> {deliveryEstimate.minTime}-{deliveryEstimate.maxTime} min
+                   </span>
+                   {deliveryEstimate.reason && (
+                     <span className="text-[10px] text-primary">
+                       {deliveryEstimate.weatherImpact && '☔ '}{deliveryEstimate.reason}
+                     </span>
+                   )}
+                 </div>
+               ) : (
+                 <span className="flex items-center gap-1"><Clock size={16} /> 30-45 min</span>
+               )}
+             </div>
           </div>
         </div>
       </div>
@@ -425,7 +533,7 @@ export default function PublicMenu() {
 
       {/* BENTO GRID MENU */}
       <div className="max-w-5xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {menuItems
+        {filteredMenuItems
           .filter(i => activeCategory === 'Todos' || i.category === activeCategory)
           .map((item, index) => (
           <motion.div 

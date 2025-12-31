@@ -1,645 +1,316 @@
-/**
- * Kitchen Display System (KDS)
- * Real-time order management for kitchen staff
- */
 
-import { useState, useEffect, useRef, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { collection, query, where, orderBy, onSnapshot, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db, auth } from '../config/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Clock, ChefHat, CheckCircle, AlertTriangle, 
-  Volume2, VolumeX, RefreshCw, Users, Package,
-  Flame, ChevronRight
-} from 'lucide-react';
-import { 
-  collection, 
-  query, 
-  where, 
-  onSnapshot, 
-  updateDoc,
-  doc,
-  orderBy,
-  Timestamp
-} from 'firebase/firestore';
-import { db } from '../config/firebase';
-import { formatDistanceToNow } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import type { Order, OrderStatus } from '../types/orders';
-import VoiceControl from '../components/kds/VoiceControl';
+import { ChefHat, Clock, CheckCircle, Flame, Timer, UtensilsCrossed, Bell, Printer, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ThermalReceipt } from '../components/kds/ThermalReceipt';
 
-// ══════════════════════════════════════════════════════════════════
-// STATUS CONFIG
-// ══════════════════════════════════════════════════════════════════
-
-const STATUS_CONFIG: Record<OrderStatus, { color: string; bg: string; label: string }> = {
-  pending: { color: 'text-yellow-400', bg: 'bg-yellow-500/20 border-yellow-500/50', label: 'PENDENTE' },
-  preparing: { color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500/50', label: 'PREPARANDO' },
-  ready: { color: 'text-green-400', bg: 'bg-green-500/20 border-green-500/50', label: 'PRONTO' },
-  dispatched: { color: 'text-purple-400', bg: 'bg-purple-500/20 border-purple-500/50', label: 'ENVIADO' },
-  delivered: { color: 'text-gray-400', bg: 'bg-gray-500/20 border-gray-500/50', label: 'ENTREGUE' },
-  billing_requested: { color: 'text-red-400', bg: 'bg-red-500/20 border-red-500/50', label: '💳 CONTA' },
-  closed: { color: 'text-gray-600', bg: 'bg-gray-800/50 border-gray-600/50', label: 'FECHADO' },
-  cancelled: { color: 'text-gray-600', bg: 'bg-gray-800/50 border-gray-600/50', label: 'CANCELADO' }
-};
-
-const STATUS_FLOW: OrderStatus[] = ['pending', 'preparing', 'ready', 'delivered'];
-
-// ══════════════════════════════════════════════════════════════════
-// HELPERS
-// ══════════════════════════════════════════════════════════════════
-
-function getTimeAgo(timestamp: any): string {
-  if (!timestamp) return '';
-  const date = timestamp instanceof Timestamp ? timestamp.toDate() : new Date(timestamp);
-  return formatDistanceToNow(date, { addSuffix: true, locale: ptBR });
+interface KitchenOrder {
+  id: string;
+  items: any[];
+  status: string;
+  customer: { name: string; phone?: string };
+  deliveryType?: string; 
+  tableNumber?: string;
+  createdAt: any;
+  notes?: string;
+  source?: string;
+  displayId?: string;
+  restaurantId?: string;
+  total?: number;
+  financials?: { total: number };
+  paymentStatus?: string;
 }
-
-function getMinutesSince(timestamp: any): number {
-  if (!timestamp) return 0;
-  const date = timestamp instanceof Timestamp ? timestamp.toDate() : new Date(timestamp);
-  return Math.floor((Date.now() - date.getTime()) / 60000);
-}
-
-// ══════════════════════════════════════════════════════════════════
-// PRODUCTION SUMMARY COMPONENT
-// ══════════════════════════════════════════════════════════════════
-
-interface ProductionSummaryProps {
-  orders: Order[];
-}
-
-function ProductionSummary({ orders }: ProductionSummaryProps) {
-  // Aggregate items from pending and preparing orders
-  const aggregatedItems = useMemo(() => {
-    const itemMap = new Map<string, { name: string; quantity: number; image?: string }>();
-    
-    orders
-      .filter(o => o.status === 'pending' || o.status === 'preparing')
-      .forEach(order => {
-        order.items.forEach(item => {
-          const existing = itemMap.get(item.name);
-          if (existing) {
-            existing.quantity += item.quantity;
-          } else {
-            itemMap.set(item.name, {
-              name: item.name,
-              quantity: item.quantity,
-              image: item.image
-            });
-          }
-        });
-      });
-    
-    // Sort by quantity (highest first)
-    return Array.from(itemMap.values()).sort((a, b) => b.quantity - a.quantity);
-  }, [orders]);
-
-  if (aggregatedItems.length === 0) return null;
-
-  const totalItems = aggregatedItems.reduce((sum, item) => sum + item.quantity, 0);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      className="bg-gradient-to-br from-orange-500/10 to-red-500/5 border border-orange-500/30 rounded-2xl p-4"
-    >
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 bg-orange-500/20 rounded-lg flex items-center justify-center">
-          <Flame className="w-4 h-4 text-orange-400" />
-        </div>
-        <div>
-          <h3 className="font-black text-sm uppercase">Resumo da Chapa</h3>
-          <p className="text-[10px] text-white/40">{totalItems} itens na fila</p>
-        </div>
-      </div>
-
-      {/* Aggregated Items */}
-      <div className="space-y-2 max-h-[300px] overflow-y-auto">
-        {aggregatedItems.map((item, index) => (
-          <motion.div
-            key={item.name}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: index * 0.05 }}
-            className="flex items-center gap-3 p-3 bg-black/30 rounded-xl"
-          >
-            {/* Quantity Badge */}
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl ${
-              item.quantity >= 5 ? 'bg-red-500/30 text-red-400' :
-              item.quantity >= 3 ? 'bg-yellow-500/30 text-yellow-400' :
-              'bg-white/10 text-white'
-            }`}>
-              {item.quantity}x
-            </div>
-            
-            {/* Item Name */}
-            <span className="font-bold text-sm flex-1 truncate">{item.name}</span>
-            
-            {/* Priority Indicator */}
-            {item.quantity >= 5 && (
-              <span className="px-2 py-1 bg-red-500/20 text-red-400 text-[10px] font-bold rounded-full uppercase">
-                Urgente
-              </span>
-            )}
-          </motion.div>
-        ))}
-      </div>
-
-      {/* Footer Tip */}
-      <div className="mt-4 pt-3 border-t border-white/10 text-center">
-        <p className="text-[10px] text-white/30">
-          💡 Produza em lote para maior eficiência
-        </p>
-      </div>
-    </motion.div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// ORDER CARD COMPONENT
-// ══════════════════════════════════════════════════════════════════
-
-interface OrderCardProps {
-  order: Order;
-  onAdvanceStatus: () => void;
-  onShowDetails: () => void;
-}
-
-function OrderCard({ order, onAdvanceStatus, onShowDetails }: OrderCardProps) {
-  const config = STATUS_CONFIG[order.status];
-  const minutes = getMinutesSince(order.createdAt);
-  const isBillingRequested = order.status === 'billing_requested';
-
-  // Delay-based border colors
-  const getDelayBorder = () => {
-    if (order.status === 'delivered' || order.status === 'closed') return '';
-    if (minutes > 20) return 'border-red-500 ring-2 ring-red-500/50 animate-pulse';
-    if (minutes > 10) return 'border-yellow-500';
-    return 'border-green-500';
-  };
-
-  // Call waiter handler
-  const handleCallWaiter = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    console.log(`🔔 [WAITER CALL] Pedido #${order.id?.slice(-4).toUpperCase()} está PRONTO para entrega na Mesa ${order.customer?.table || 'N/A'}`);
-    alert(`Garçom notificado! Pedido #${order.id?.slice(-4).toUpperCase()} pronto para entrega.`);
-  };
-
-  return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      className={`
-        ${config.bg} border-2 rounded-2xl p-4 cursor-pointer select-none
-        ${getDelayBorder()}
-        ${isBillingRequested ? 'ring-2 ring-red-500/50' : ''}
-        hover:scale-[1.02] transition-transform
-      `}
-      onClick={onAdvanceStatus}
-      onDoubleClick={onShowDetails}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-3xl font-black text-white">
-            #{order.id?.slice(-4).toUpperCase() || '?'}
-          </span>
-          {order.customer?.table && (
-            <span className="px-2 py-1 bg-white/10 rounded-lg text-xs font-bold uppercase">
-              Mesa {order.customer.table}
-            </span>
-          )}
-        </div>
-        <span className={`text-xs font-black uppercase ${config.color}`}>
-          {config.label}
-        </span>
-      </div>
-
-      {/* Customer */}
-      <div className="flex items-center gap-2 mb-3 text-white/60">
-        <Users className="w-4 h-4" />
-        <span className="text-sm font-bold truncate">
-          {order.customer?.name || 'Anônimo'}
-        </span>
-      </div>
-
-      {/* Items */}
-      <div className="space-y-1 mb-3">
-        {order.items.slice(0, 4).map((item, i) => (
-          <div 
-            key={i} 
-            className="flex justify-between text-sm"
-          >
-            <span className="font-bold text-white">
-              {item.quantity}x {item.name}
-            </span>
-            {item.notes && (
-              <span className="text-yellow-400 text-xs">⚠️</span>
-            )}
-          </div>
-        ))}
-        {order.items.length > 4 && (
-          <span className="text-xs text-white/40">
-            +{order.items.length - 4} mais...
-          </span>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-between pt-3 border-t border-white/10">
-        <div className={`flex items-center gap-1 text-xs font-bold ${
-          minutes > 20 ? 'text-red-400' : minutes > 10 ? 'text-yellow-400' : 'text-green-400'
-        }`}>
-          <Clock className="w-3 h-3" />
-          {minutes} min
-        </div>
-        <span className="text-lg font-black text-primary">
-          R$ {order.total.toFixed(2).replace('.', ',')}
-        </span>
-      </div>
-
-      {/* Call Waiter Button (only for ready orders) */}
-      {order.status === 'ready' && (
-        <button
-          onClick={handleCallWaiter}
-          className="w-full mt-3 py-2 bg-green-500 hover:bg-green-600 rounded-xl text-sm font-black uppercase tracking-wider transition-colors"
-        >
-          🔔 Chamar Garçom
-        </button>
-      )}
-    </motion.div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ══════════════════════════════════════════════════════════════════
 
 export default function KitchenDisplay() {
-  const { restaurantId } = useParams<{ restaurantId: string }>();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [showSummary, setShowSummary] = useState(true);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [newOrders, setNewOrders] = useState<KitchenOrder[]>([]);
+  const [prepOrders, setPrepOrders] = useState<KitchenOrder[]>([]);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
+  const [printingOrder, setPrintingOrder] = useState<KitchenOrder | null>(null);
+  
+  const audioRef = useRef(new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'));
+  const isFirstLoad = useRef(true);
+  const previousOrderCount = useRef(0);
 
-  // Subscribe to real-time orders
   useEffect(() => {
-    if (!restaurantId) return;
+    const user = auth.currentUser;
+    if (!user) return;
 
+    // QUERY ABRANGENTE: Pega maiúsculo e minúsculo
     const q = query(
       collection(db, 'orders'),
-      where('restaurantId', '==', restaurantId),
-      where('status', 'in', ['pending', 'preparing', 'ready', 'billing_requested']),
+      where('restaurantId', '==', user.uid),
+      where('status', 'in', ['PENDING', 'pending', 'PREPARING', 'preparing', 'READY', 'ready']),
       orderBy('createdAt', 'asc')
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newOrders: Order[] = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id
-      } as Order));
+    const unsub = onSnapshot(q, (snap) => {
+      const pending: KitchenOrder[] = [];
+      const preparing: KitchenOrder[] = [];
 
-      // Play sound for new pending orders
-      const prevPendingCount = orders.filter(o => o.status === 'pending').length;
-      const newPendingCount = newOrders.filter(o => o.status === 'pending').length;
-      
-      if (newPendingCount > prevPendingCount && soundEnabled) {
-        playNotificationSound();
+      snap.docs.forEach(doc => {
+        const data = { id: doc.id, ...doc.data() } as KitchenOrder;
+        const s = data.status?.toUpperCase();
+        
+        if (s === 'PENDING') pending.push(data);
+        else if (s === 'PREPARING') preparing.push(data);
+      });
+
+      // Tocar som se chegou pedido novo (e não é a primeira carga da página)
+      if (!isFirstLoad.current && pending.length > previousOrderCount.current) {
+        audioRef.current.play().catch(() => {});
+        toast.info("🔔 Novo pedido na cozinha!");
       }
 
-      setOrders(newOrders);
+      previousOrderCount.current = pending.length;
+      setNewOrders(pending);
+      setPrepOrders(preparing);
+      isFirstLoad.current = false;
     });
 
-    return () => unsubscribe();
-  }, [restaurantId, soundEnabled]);
+    return () => unsub();
+  }, []);
 
-  // Notification sound (simple beep)
-  const playNotificationSound = () => {
+  const updateStatus = async (orderId: string, newStatus: 'PREPARING' | 'READY') => {
+    setLoadingAction(orderId);
     try {
-      audioRef.current?.play();
-    } catch (e) {
-      console.log('Audio play blocked');
-    }
-  };
-
-  // Advance order status
-  const advanceStatus = async (order: Order) => {
-    const currentIndex = STATUS_FLOW.indexOf(order.status as typeof STATUS_FLOW[number]);
-    if (currentIndex === -1 || currentIndex >= STATUS_FLOW.length - 1) return;
-
-    const nextStatus = STATUS_FLOW[currentIndex + 1];
-    
-    try {
-      await updateDoc(doc(db, 'orders', order.id), {
-        status: nextStatus,
-        updatedAt: Timestamp.now(),
-        ...(nextStatus === 'delivered' && { completedAt: Timestamp.now() })
+      await updateDoc(doc(db, 'orders', orderId), { 
+        status: newStatus,
+        ...(newStatus === 'READY' ? { kitchenFinishedAt: serverTimestamp() } : {}),
+        updatedAt: serverTimestamp()
       });
-    } catch (error) {
-      console.error('Error updating order:', error);
+      
+      if (newStatus === 'READY') {
+        toast.success("Pedido enviado para expedição!");
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro ao atualizar. Tente novamente.");
+    } finally {
+      setLoadingAction(null);
     }
   };
 
-  // Filter orders by status
-  const pendingOrders = orders.filter(o => o.status === 'pending');
-  const preparingOrders = orders.filter(o => o.status === 'preparing');
-  const readyOrders = orders.filter(o => o.status === 'ready');
-  const billingOrders = orders.filter(o => o.status === 'billing_requested');
+  const handlePrint = (order: KitchenOrder) => {
+    setPrintingOrder(order);
+    setTimeout(() => {
+      window.print();
+      setPrintingOrder(null);
+    }, 500);
+  };
 
-  // Voice command handler (unified interface)
-  const handleVoiceCommand = async (command: string, value: string) => {
-    if (command === 'ready') {
-      // Find order by number (last 2-4 digits of ID or orderNumber)
-      const order = orders.find(o => 
-        o.id?.slice(-4).toUpperCase().includes(value.toUpperCase()) ||
-        o.id?.slice(-2) === value ||
-        String(o.id).includes(value)
-      );
-      
-      if (order) {
-        await updateDoc(doc(db, 'orders', order.id), {
-          status: 'ready',
-          updatedAt: Timestamp.now()
-        });
-      } else {
-        toast.error(`Pedido ${value} não encontrado`);
-      }
-    } else if (command === 'call_waiter') {
-      toast.success('🔔 Garçom foi notificado!', { duration: 3000 });
-      console.log('[VOICE] Waiter called from KDS');
-    }
+  const getElapsedTime = (date: any) => {
+    if (!date) return '0m';
+    const start = date.toDate ? date.toDate().getTime() : new Date(date).getTime();
+    const mins = Math.floor((Date.now() - start) / 60000);
+    return `${mins}m`;
   };
 
   return (
-    <div className="min-h-screen bg-black text-white p-4 md:p-6">
-      {/* Audio element for notifications */}
-      <audio 
-        ref={audioRef} 
-        src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleCADB3qO3+ug"
-        preload="auto"
-      />
+    <div className="min-h-screen bg-[#101010] text-white p-4">
+      {/* Área de Impressão (Oculta na tela, visível na impressão) */}
+      {printingOrder && (
+        <div className="hidden print:block fixed top-0 left-0 bg-white text-black w-full h-full z-[9999]">
+           <ThermalReceipt order={printingOrder} />
+        </div>
+      )}
 
-      {/* Header */}
-      <header className="flex items-center justify-between mb-6">
+      {/* HEADER */}
+      <header className="flex items-center justify-between mb-6 p-4 bg-[#1a1a1a] rounded-2xl border border-white/5 shadow-xl print:hidden">
         <div className="flex items-center gap-4">
-          <ChefHat className="w-10 h-10 text-primary" />
+          <div className="p-3 bg-orange-500/10 rounded-xl text-orange-500 border border-orange-500/20">
+            <ChefHat size={32} />
+          </div>
           <div>
-            <h1 className="text-2xl md:text-4xl font-black uppercase tracking-tight">
-              Cozinha
+            <h1 className="text-2xl font-black uppercase tracking-tighter flex items-center gap-2">
+              Cozinha <span className="text-orange-500">Inteligente</span>
+              <span className="text-[10px] bg-white/10 px-2 py-0.5 rounded text-white/40">V2.0</span>
             </h1>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">
-              Kitchen Display System
+            <p className="text-xs text-white/40 font-bold flex items-center gap-1">
+              <Volume2 size={10} /> Sistema de som ativo
             </p>
           </div>
         </div>
-
-        <div className="flex items-center gap-3">
-          {/* Billing Alert */}
-          {billingOrders.length > 0 && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-red-500/20 border border-red-500 rounded-xl animate-pulse">
-              <AlertTriangle className="w-5 h-5 text-red-400" />
-              <span className="text-sm font-bold text-red-400">
-                {billingOrders.length} Conta(s) Pedida(s)
-              </span>
+        <div className="flex gap-4">
+            <div className="text-center">
+                <span className="block text-3xl font-black text-white">{newOrders.length}</span>
+                <span className="text-[10px] text-white/40 uppercase font-bold">A Fazer</span>
             </div>
-          )}
-
-          {/* Toggle Summary */}
-          <button 
-            onClick={() => setShowSummary(!showSummary)}
-            className={`p-3 rounded-xl transition-colors ${showSummary ? 'bg-orange-500/20 text-orange-400' : 'bg-white/10'}`}
-            title="Resumo da Produção"
-          >
-            <Package className="w-6 h-6" />
-          </button>
-
-          {/* Sound Toggle */}
-          <button 
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className={`p-3 rounded-xl transition-colors ${soundEnabled ? 'bg-primary' : 'bg-white/10'}`}
-          >
-            {soundEnabled ? (
-              <Volume2 className="w-6 h-6" />
-            ) : (
-              <VolumeX className="w-6 h-6" />
-            )}
-          </button>
-
-          {/* Refresh */}
-          <button 
-            onClick={() => window.location.reload()}
-            className="p-3 bg-white/10 rounded-xl hover:bg-white/20 transition-colors"
-          >
-            <RefreshCw className="w-6 h-6" />
-          </button>
+            <div className="w-px bg-white/10"></div>
+            <div className="text-center">
+                <span className="block text-3xl font-black text-orange-500">{prepOrders.length}</span>
+                <span className="text-[10px] text-orange-500/60 uppercase font-bold">No Fogo</span>
+            </div>
         </div>
       </header>
 
-      {/* Billing Requested Priority Section */}
-      {billingOrders.length > 0 && (
-        <section className="mb-6">
-          <h2 className="text-sm font-black uppercase tracking-widest text-red-400 mb-3 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4" />
-            CONTAS PEDIDAS - PRIORIDADE
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-160px)] print:hidden">
+        
+        {/* COLUNA 1: NOVOS PEDIDOS (PENDING) */}
+        <div className="bg-[#0a0a0a] rounded-3xl border border-white/5 p-4 flex flex-col shadow-inner">
+          <h2 className="text-sm font-black uppercase mb-4 flex items-center gap-2 text-white/60 tracking-widest">
+            <Bell className="w-4 h-4 text-blue-500" /> Fila de Pedidos
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <AnimatePresence>
-              {billingOrders.map(order => (
-                <OrderCard 
+          <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+            <AnimatePresence mode="popLayout">
+              {newOrders.length === 0 && (
+                <div className="text-center py-20 opacity-30">
+                  <UtensilsCrossed size={48} className="mx-auto mb-4"/>
+                  <p>Tudo limpo por aqui, Chef!</p>
+                </div>
+              )}
+              {newOrders.map(order => (
+                <motion.div 
                   key={order.id}
-                  order={order}
-                  onAdvanceStatus={() => advanceStatus(order)}
-                  onShowDetails={() => setSelectedOrder(order)}
-                />
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, x: -50 }}
+                  className="bg-[#18181b] p-0 rounded-xl border border-white/5 overflow-hidden group hover:border-blue-500/50 transition-all relative"
+                >
+                  {/* ✅ INDICADOR DE PAGAMENTO PIX */}
+                  {order.paymentStatus === 'PAID' && (
+                    <div className="absolute top-2 right-2 bg-green-500 text-black text-[10px] font-black px-2 py-1 rounded shadow-lg animate-bounce z-20">
+                      💳 PAGO (PIX)
+                    </div>
+                  )}
+                  <div className="p-4 flex justify-between items-start bg-gradient-to-r from-blue-500/5 to-transparent">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-bold text-lg text-white">{order.customer.name}</h3>
+                        <span className="text-[10px] font-mono text-white/30">#{order.id.slice(-4)}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        {order.deliveryType === 'DINE_IN' ? (
+                           <span className="bg-purple-500/20 text-purple-400 text-[10px] px-2 py-0.5 rounded font-bold uppercase">
+                             Mesa {order.tableNumber}
+                           </span>
+                        ) : (
+                           <span className="bg-green-500/20 text-green-400 text-[10px] px-2 py-0.5 rounded font-bold uppercase">
+                             {order.source || 'Delivery'}
+                           </span>
+                        )}
+                        <span className="bg-white/5 text-white/60 text-[10px] px-2 py-0.5 rounded font-bold uppercase flex items-center gap-1">
+                          <Timer size={10} /> {getElapsedTime(order.createdAt)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => handlePrint(order)}
+                        className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-white/60 transition-colors"
+                        title="Imprimir Ticket"
+                      >
+                        <Printer size={18} />
+                      </button>
+                      <button 
+                        onClick={() => updateStatus(order.id, 'PREPARING')}
+                        disabled={loadingAction === order.id}
+                        className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-xl font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-900/20 transition-all active:scale-95 disabled:opacity-50"
+                      >
+                        {loadingAction === order.id ? '...' : 'Iniciar'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-4 border-t border-white/5 bg-black/20">
+                    <ul className="space-y-2">
+                      {order.items.map((item, idx) => (
+                        <li key={idx} className="flex items-start gap-3">
+                          <span className="font-black text-blue-400 bg-blue-400/10 px-1.5 rounded text-sm">{item.quantity}x</span>
+                          <div>
+                            <span className="text-sm font-medium text-white/90 block">{item.name}</span>
+                            {item.notes && <span className="text-xs text-red-400 font-bold block mt-0.5">⚠️ {item.notes}</span>}
+                            {item.options && item.options.length > 0 && (
+                                <span className="text-[10px] text-white/40 block">
+                                  + {item.options.map((o:any) => o.name).join(', ')}
+                                </span>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {order.notes && (
+                        <div className="mt-3 p-2 bg-yellow-500/10 border border-yellow-500/20 rounded text-xs text-yellow-200">
+                           📝 {order.notes}
+                        </div>
+                    )}
+                  </div>
+                </motion.div>
               ))}
             </AnimatePresence>
           </div>
-        </section>
-      )}
-
-      {/* Main Layout with Production Summary */}
-      <div className="flex gap-6">
-        {/* Production Summary Sidebar */}
-        <AnimatePresence>
-          {showSummary && (
-            <motion.div
-              initial={{ opacity: 0, width: 0 }}
-              animate={{ opacity: 1, width: 280 }}
-              exit={{ opacity: 0, width: 0 }}
-              className="hidden lg:block shrink-0"
-            >
-              <ProductionSummary orders={orders} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Kanban Columns */}
-        <div className="flex-1 grid md:grid-cols-3 gap-6">
-          {/* Pending Column */}
-          <section>
-            <h2 className="text-sm font-black uppercase tracking-widest text-yellow-400 mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              PENDENTES ({pendingOrders.length})
-            </h2>
-            <div className="space-y-4">
-              <AnimatePresence>
-                {pendingOrders.map(order => (
-                  <OrderCard 
-                    key={order.id}
-                    order={order}
-                    onAdvanceStatus={() => advanceStatus(order)}
-                    onShowDetails={() => setSelectedOrder(order)}
-                  />
-                ))}
-              </AnimatePresence>
-              {pendingOrders.length === 0 && (
-                <div className="text-center py-12 text-white/20">
-                  <CheckCircle className="w-12 h-12 mx-auto mb-2" />
-                  <p className="text-sm font-bold">Nenhum pendente</p>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Preparing Column */}
-          <section>
-            <h2 className="text-sm font-black uppercase tracking-widest text-blue-400 mb-3 flex items-center gap-2">
-              <ChefHat className="w-4 h-4" />
-              PREPARANDO ({preparingOrders.length})
-            </h2>
-            <div className="space-y-4">
-              <AnimatePresence>
-                {preparingOrders.map(order => (
-                  <OrderCard 
-                    key={order.id}
-                    order={order}
-                    onAdvanceStatus={() => advanceStatus(order)}
-                    onShowDetails={() => setSelectedOrder(order)}
-                  />
-                ))}
-              </AnimatePresence>
-              {preparingOrders.length === 0 && (
-                <div className="text-center py-12 text-white/20">
-                  <ChefHat className="w-12 h-12 mx-auto mb-2" />
-                  <p className="text-sm font-bold">Nenhum em preparo</p>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Ready Column */}
-          <section>
-            <h2 className="text-sm font-black uppercase tracking-widest text-green-400 mb-3 flex items-center gap-2">
-              <CheckCircle className="w-4 h-4" />
-              PRONTOS ({readyOrders.length})
-            </h2>
-            <div className="space-y-4">
-              <AnimatePresence>
-                {readyOrders.map(order => (
-                  <OrderCard 
-                    key={order.id}
-                    order={order}
-                    onAdvanceStatus={() => advanceStatus(order)}
-                    onShowDetails={() => setSelectedOrder(order)}
-                  />
-                ))}
-              </AnimatePresence>
-              {readyOrders.length === 0 && (
-                <div className="text-center py-12 text-white/20">
-                  <CheckCircle className="w-12 h-12 mx-auto mb-2" />
-                  <p className="text-sm font-bold">Nenhum pronto</p>
-                </div>
-              )}
-            </div>
-          </section>
         </div>
-      </div>
 
-      {/* Order Details Modal */}
-      <AnimatePresence>
-        {selectedOrder && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4"
-            onClick={() => setSelectedOrder(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-[#1a1a1a] rounded-3xl p-8 max-w-md w-full border border-white/10"
-              onClick={e => e.stopPropagation()}
-            >
-              <h3 className="text-3xl font-black mb-4">
-                Pedido #{selectedOrder.id?.slice(-4).toUpperCase()}
-              </h3>
-              
-              <div className="mb-4 p-4 bg-white/5 rounded-xl">
-                <p className="font-bold">{selectedOrder.customer?.name}</p>
-                <p className="text-white/40 text-sm">CPF: {selectedOrder.customer?.cpf}</p>
-                {selectedOrder.customer?.table && (
-                  <p className="text-white/40 text-sm">Mesa: {selectedOrder.customer.table}</p>
-                )}
-              </div>
-
-              <div className="space-y-2 mb-6">
-                {selectedOrder.items.map((item, i) => (
-                  <div key={i} className="flex justify-between p-3 bg-white/5 rounded-xl">
-                    <div>
-                      <span className="font-bold">{item.quantity}x {item.name}</span>
-                      {item.notes && (
-                        <p className="text-xs text-yellow-400">⚠️ {item.notes}</p>
-                      )}
-                    </div>
-                    <span className="text-primary font-bold">
-                      R$ {(item.price * item.quantity).toFixed(2)}
-                    </span>
+        {/* COLUNA 2: EM PREPARO (PREPARING) */}
+        <div className="bg-[#0a0a0a] rounded-3xl border border-white/5 p-4 flex flex-col shadow-inner">
+          <h2 className="text-sm font-black uppercase mb-4 flex items-center gap-2 text-white/60 tracking-widest">
+            <Flame className="w-4 h-4 text-orange-500" /> Em Preparo
+          </h2>
+          <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+            <AnimatePresence mode="popLayout">
+              {prepOrders.map(order => (
+                <motion.div 
+                  key={order.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, x: 50 }}
+                  className="bg-[#18181b] rounded-xl border-l-4 border-orange-500 overflow-hidden relative"
+                >
+                  <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none">
+                     <Flame size={100} />
                   </div>
-                ))}
-              </div>
 
-              <div className="flex justify-between items-center p-4 bg-primary/20 rounded-xl">
-                <span className="font-bold">TOTAL</span>
-                <span className="text-2xl font-black text-primary">
-                  R$ {selectedOrder.total.toFixed(2).replace('.', ',')}
-                </span>
-              </div>
+                  <div className="p-5 flex justify-between items-start relative z-10">
+                    <div>
+                      <h3 className="font-bold text-xl text-white mb-1">{order.customer.name}</h3>
+                      <div className="flex items-center gap-2">
+                          <span className="text-orange-500 text-xs font-bold uppercase flex items-center gap-1 bg-orange-500/10 px-2 py-1 rounded">
+                             <Clock size={12} /> {getElapsedTime(order.createdAt)}
+                          </span>
+                          <span className="text-white/30 text-xs font-mono">
+                             {order.items.reduce((acc: number, item: any) => acc + item.quantity, 0)} itens
+                          </span>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => handlePrint(order)}
+                        className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-white/60 transition-colors"
+                        title="Imprimir Ticket"
+                      >
+                        <Printer size={18} />
+                      </button>
+                      <button 
+                        onClick={() => updateStatus(order.id, 'READY')}
+                        disabled={loadingAction === order.id}
+                        className="bg-green-600 hover:bg-green-500 text-white px-6 py-4 rounded-xl font-bold text-sm uppercase tracking-wider shadow-lg shadow-green-900/20 transition-all active:scale-95 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        {loadingAction === order.id ? <Timer className="animate-spin"/> : <CheckCircle size={18} />}
+                        <span>Pronto</span>
+                      </button>
+                    </div>
+                  </div>
 
-              <button
-                onClick={() => setSelectedOrder(null)}
-                className="w-full mt-4 py-3 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition-colors"
-              >
-                Fechar
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                  <div className="px-5 pb-5">
+                     <div className="flex flex-wrap gap-2">
+                        {order.items.map((item, idx) => (
+                           <span key={idx} className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg text-sm font-medium text-white/80">
+                              <span className="text-orange-500 font-bold mr-1">{item.quantity}x</span> {item.name}
+                           </span>
+                        ))}
+                     </div>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
 
-      {/* Voice Control */}
-      <VoiceControl onCommand={handleVoiceCommand} />
+      </div>
     </div>
   );
 }
-
-// ══════════════════════════════════════════════════════════════════
-// VOICE CONTROL WRAPPER
-// ══════════════════════════════════════════════════════════════════
-
-function KitchenDisplayWithVoice() {
-  return <KitchenDisplayContent />;
-}
-
-function KitchenDisplayContent() {
-  // Get orders from parent or use hook
-  return <KitchenDisplay />;
-}
-

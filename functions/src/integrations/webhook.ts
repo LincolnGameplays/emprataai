@@ -9,14 +9,12 @@ import {
   normalizeUberEatsOrder 
 } from './adapters';
 
-// --- CORREÇÃO DE INICIALIZAÇÃO ---
-// Garante que o Admin SDK esteja iniciado antes de chamar firestore()
+// Inicialização segura do Admin SDK
 if (!admin.apps.length) {
   admin.initializeApp();
 }
-const db = admin.firestore();
 
-// Variáveis de Ambiente
+// Configuração de Segredos (Variáveis de Ambiente)
 const UBER_TOKEN = process.env.UBER_EATS_TOKEN;
 const WEBHOOK_SECRETS: Record<string, string | undefined> = {
   IFOOD: process.env.IFOOD_WEBHOOK_SECRET,
@@ -30,8 +28,8 @@ function validateSignature(
   signature: string
 ): boolean {
   const secret = WEBHOOK_SECRETS[source];
-  if (!secret) return true; // Aceita se não tiver segredo (Teste)
-  if (!signature) return false; // Rejeita se tiver segredo mas não assinatura
+  if (!secret) return true; // Modo teste (sem segredo configurado)
+  if (!signature) return false;
 
   const expectedSignature = crypto
     .createHmac("sha256", secret)
@@ -46,36 +44,52 @@ function validateSignature(
 }
 
 export const deliveryHubWebhook = onRequest(async (req, res) => {
+  // REMOVIDO: res.setTimeout(5000); -> Isso causa erro em Cloud Functions V2
+
   const source = (req.query.source as string)?.toUpperCase();
   const restaurantId = req.query.rid as string;
   const signature = req.headers['x-signature'] as string || '';
 
+  // Conecta ao DB dentro da função para garantir que o app já iniciou
+  const db = admin.firestore();
+
   console.log(`[HUB] Recebido evento de ${source}`);
 
-  // Validação de segurança (Apenas loga aviso por enquanto)
+  // 1. Validação de Parâmetros
+  if (!source || !restaurantId) {
+    console.error("[HUB] Parâmetros faltando");
+    res.status(400).send("Missing source or rid parameter");
+    return;
+  }
+
+  // 2. Validação de Assinatura
   if (req.rawBody && !validateSignature(source, req.rawBody.toString(), signature)) {
       console.warn(`[HUB SECURITY] Assinatura inválida para ${source}`);
+      // Em produção, descomente: res.status(401).send('Invalid Signature');
   }
 
   try {
-    let orderData = null;
-
-    // --- PROTEÇÃO CONTRA PAYLOAD VAZIO ---
+    // 3. Proteção contra Body Vazio
     if (!req.body) {
        console.error('[HUB] Body vazio');
        res.status(400).send('Empty body');
        return;
     }
 
+    let orderData = null;
+
     switch (source) {
         case 'IFOOD':
-            // Verifica se o evento é de novo pedido
+            // O iFood manda 'PLACED' ou 'CONCLUDED'
             if (req.body.code === 'PLACED' || req.body.code === 'CONCLUDED') {
                 if (req.body.data) {
                     orderData = normalizeiFoodOrder(req.body.data, restaurantId);
                 } else {
-                    console.warn('[HUB] iFood PLACED sem dados:', req.body);
+                    console.warn('[HUB] iFood PLACED sem dados. Ignorando.');
                 }
+            } else {
+                // Eventos de polling ou keepalive
+                console.log(`[HUB] Evento iFood ignorado: ${req.body.code}`);
             }
             break;
 
@@ -97,18 +111,12 @@ export const deliveryHubWebhook = onRequest(async (req, res) => {
             }
             break;
             
-        case '99FOOD':
-            if (req.body.status === 1) { 
-                console.log('[HUB] 99Food recebido (adapter pendente)');
-            }
-            break;
-            
         default:
             console.warn(`Fonte desconhecida: ${source}`);
     }
 
+    // 4. Salvar no Firestore
     if (orderData) {
-        // Usa ID externo como chave para evitar duplicidade
         await db.collection('orders').doc(orderData.externalId).set({
             ...orderData,
             integrated: true,
@@ -116,15 +124,18 @@ export const deliveryHubWebhook = onRequest(async (req, res) => {
         }, { merge: true });
 
         console.log(`[HUB] ✅ Pedido ${orderData.externalId} salvo com sucesso!`);
+        
+        // Retorna JSON com sucesso para o iFood processar
+        res.status(200).json({ success: true });
+        return;
     }
 
-    // Responde 200 OK (Texto simples é mais seguro para webhooks universais)
+    // Se não for pedido novo, retorna OK apenas
     res.status(200).send('OK');
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[HUB CRITICAL ERROR]', error);
-    // Retorna 200 mesmo com erro para o iFood não ficar tentando reenviar infinitamente se for erro de lógica
-    // Mas loga o erro no console do Firebase para você ver
-    res.status(500).send('Server Error');
+    // Retorna erro formatado para evitar que o iFood ache que é erro de parse
+    res.status(500).json({ error: error.message || 'Internal Server Error' });
   }
 });

@@ -1,61 +1,63 @@
-
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 
 // Layouts
 import AppLayout from './layouts/AppLayout';
+import CustomerLayout from './layouts/CustomerLayout'; // Vamos criar/atualizar este a seguir
 
-// Pages
+// Pages - Public
 import LandingPage from './pages/LandingPage';
 import LoginPage from './pages/LoginPage';
-import AppStudio from './pages/AppStudio';
-import Dashboard from './pages/Dashboard';
-import MenuBuilder from './pages/MenuBuilder';
 import PublicMenu from './pages/PublicMenu';
-import KitchenDisplay from './pages/KitchenDisplay';
-import QrPrint from './pages/QrPrint';
-import StaffManagement from './pages/StaffManagement';
-import WaiterLogin from './pages/WaiterLogin';
-import WaiterApp from './pages/WaiterApp';
-import ProfilePage from './pages/ProfilePage';
-import UserProfile from './pages/admin/UserProfile';
-import SuccessPage from './pages/SuccessPage';
 import PrivacyPage from './pages/PrivacyPage';
 import TermsPage from './pages/TermsPage';
 import NotFoundPage from './pages/NotFoundPage';
-import ToolsHub from './pages/ToolsHub';
-import WhatsappTool from './pages/WhatsappTool';
-import DispatchConsole from './pages/DispatchConsole';
-import DriverApp from './pages/DriverApp';
-import DeliveryTracking from './pages/DeliveryTracking';
-import FinanceDashboard from './pages/admin/FinanceDashboard';
 
-// Marketplace (Consumer)
+// Pages - Admin (Dono)
+import Dashboard from './pages/Dashboard';
+import DispatchConsole from './pages/DispatchConsole';
+import KitchenDisplay from './pages/KitchenDisplay';
+import MenuBuilder from './pages/MenuBuilder';
+import AppStudio from './pages/AppStudio';
+import StaffManagement from './pages/StaffManagement';
+import ProfilePage from './pages/ProfilePage';
+import FinanceDashboard from './pages/admin/FinanceDashboard';
+import BusinessIntelligence from './pages/admin/BusinessIntelligence';
+import StorefrontEditor from './components/admin/StorefrontEditor'; // Componente que criamos antes
+
+// Pages - Marketplace (Cliente)
 import MarketplaceHome from './pages/marketplace/Home';
 import ConsumerProfile from './pages/marketplace/ConsumerProfile';
+import DeliveryTracking from './pages/DeliveryTracking';
+
+// Pages - Workforce Apps (PWA Mobile)
+import DriverApp from './pages/DriverApp';
+import WaiterApp from './pages/WaiterApp';
+import WaiterLogin from './pages/WaiterLogin';
+import StaffLogin from './pages/StaffLogin';
+import AppsHub from './pages/AppsHub';
+import OwnerApp from './pages/apps/OwnerApp';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
-import CheckoutModal from './components/CheckoutModal';
+import { useAuth } from './hooks/useAuth';
 
-// Hooks
-import { usePendingCheckout } from './hooks/usePendingCheckout';
+// ----------------------------------------------------------------------
+// ROTA INTELIGENTE (Define para onde ir ao abrir o app)
+// ----------------------------------------------------------------------
+function RootRedirect() {
+  const { user, loading } = useAuth();
+  const lastMode = localStorage.getItem('emprata_mode'); // 'OWNER' ou 'CUSTOMER'
 
-function AuthWrapper({ children }: { children: React.ReactNode }) {
-  const { pendingPlan, clearPending } = usePendingCheckout();
-  return (
-    <>
-      {children}
-      {pendingPlan && (
-        <CheckoutModal
-          isOpen={!!pendingPlan}
-          onClose={clearPending}
-          plan={pendingPlan.plan}
-          price={pendingPlan.price}
-        />
-      )}
-    </>
-  );
+  if (loading) return null;
+
+  if (!user) return <LandingPage />;
+
+  // Se o usuário estava no modo Dono, vai pro Dashboard
+  if (lastMode === 'OWNER') return <Navigate to="/dashboard" replace />;
+  
+  // Caso contrário, vai para o Delivery (Cliente)
+  return <Navigate to="/delivery" replace />;
 }
 
 export default function App() {
@@ -69,51 +71,51 @@ export default function App() {
         }}
       />
       
-      <AuthWrapper>
       <Routes>
+        {/* RAIZ INTELIGENTE */}
+        <Route path="/" element={<RootRedirect />} />
+
         {/* ROTAS PÚBLICAS */}
-        <Route path="/" element={<LandingPage />} />
         <Route path="/auth" element={<LoginPage />} />
+        <Route path="/menu/:slug" element={<PublicMenu />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
-        <Route path="/menu/:slug" element={<PublicMenu />} />
-        <Route path="/marketplace" element={<MarketplaceHome />} />
-        <Route path="/delivery" element={<MarketplaceHome />} />
-        <Route path="/me" element={<ConsumerProfile />} />
         <Route path="/track/:orderId" element={<DeliveryTracking />} />
 
-        {/* MODOS DEDICADOS (Sem Layout Padrão) */}
-        <Route path="/waiter-login" element={<WaiterLogin />} />
-        <Route path="/waiter-mode" element={<WaiterApp />} />
+        {/* 🚀 MODOS DEDICADOS - Workforce PWA Apps (Sem Layout Padrão) */}
         <Route path="/kitchen-mode" element={<KitchenDisplay />} />
-        <Route path="/driver-mode" element={<DriverApp />} />
-        {/* Rota pública da cozinha (opcional, para usar em TV separada) */}
-        <Route path="/kitchen/:restaurantId" element={<KitchenDisplay />} />
+        <Route path="/driver" element={<DriverApp />} />
+        <Route path="/waiter" element={<WaiterApp />} />
+        <Route path="/waiter-login" element={<WaiterLogin />} />
+        <Route path="/staff-login" element={<StaffLogin />} />
+        <Route path="/apps" element={<AppsHub />} />
+        <Route path="/owner" element={<ProtectedRoute><OwnerApp /></ProtectedRoute>} />
 
-        {/* ÁREA LOGADA (Com Sidebar) */}
+        {/* 🏢 MUNDO DO DONO (Protegido + AppLayout) */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/menu-builder" element={<MenuBuilder />} />
-          <Route path="/staff" element={<StaffManagement />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/admin/profile" element={<UserProfile />} />
-          <Route path="/finance" element={<FinanceDashboard />} />
-          <Route path="/success" element={<SuccessPage />} />
-          <Route path="/print-qr" element={<QrPrint />} />
-          <Route path="/tools" element={<ToolsHub />} />
-          <Route path="/tools/whatsapp" element={<WhatsappTool />} />
-          
-          {/* ✅ CORREÇÃO: Rotas simplificadas para bater com a Sidebar */}
           <Route path="/dispatch" element={<DispatchConsole />} />
           <Route path="/kitchen-display" element={<KitchenDisplay />} />
+          <Route path="/menu-builder" element={<MenuBuilder />} />
+          <Route path="/store-settings" element={<StorefrontEditor />} /> {/* Nova Rota de Vitrine */}
+          <Route path="/finance" element={<FinanceDashboard />} />
+          <Route path="/staff" element={<StaffManagement />} />
+          <Route path="/intelligence" element={<BusinessIntelligence />} />
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/studio" element={<AppStudio />} />
         </Route>
 
-        {/* STUDIO (Tela Cheia) */}
-        <Route path="/studio" element={<ProtectedRoute><AppStudio /></ProtectedRoute>} />
-        <Route path="/app" element={<Navigate to="/studio" replace />} />
+        {/* 🍔 MUNDO DO CLIENTE (Layout de App de Delivery) */}
+        <Route element={<CustomerLayout />}>
+          <Route path="/delivery" element={<MarketplaceHome />} />
+          <Route path="/search" element={<MarketplaceHome />} /> {/* Busca integrada na Home */}
+          <Route path="/me" element={<ConsumerProfile />} />
+          <Route path="/me/orders" element={<ConsumerProfile />} />
+        </Route>
+
+        {/* 404 */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-      </AuthWrapper>
     </Router>
   );
 }

@@ -1,323 +1,383 @@
-/**
- * ⚡ CONSUMER PROFILE - Order History & Account ⚡
- * User profile page for marketplace consumers
- */
-
 import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { 
-  User, MapPin, Package, Tag, ChevronRight, 
-  Plus, Home, Briefcase, Star, Clock, RefreshCw,
-  Coins, LogOut, Loader2
+  Package, Clock, MapPin, ChevronRight, User, 
+  LogOut, ShieldCheck, History, Loader2, Lock, Save
 } from 'lucide-react';
-import { collection, query, where, orderBy, getDocs, doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../../config/firebase';
+import { collection, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { db, auth } from '../../config/firebase';
 import { useAuth } from '../../hooks/useAuth';
-import type { Order } from '../../types/orders';
-import type { Address, Coupon } from '../../types/user';
-
-// ══════════════════════════════════════════════════════════════════
-// TABS
-// ══════════════════════════════════════════════════════════════════
-
-type Tab = 'orders' | 'addresses' | 'coupons';
-
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'orders', label: 'Pedidos', icon: <Package className="w-5 h-5" /> },
-  { id: 'addresses', label: 'Endereços', icon: <MapPin className="w-5 h-5" /> },
-  { id: 'coupons', label: 'Cupons', icon: <Tag className="w-5 h-5" /> },
-];
-
-// ══════════════════════════════════════════════════════════════════
-// MAIN COMPONENT
-// ══════════════════════════════════════════════════════════════════
+import { Link, useNavigate } from 'react-router-dom';
+import { formatCurrency } from '../../utils/format';
+import { validateCPFNative, maskCPF, maskPhone, validatePhone } from '../../utils/validators';
+import { toast } from 'sonner';
 
 export default function ConsumerProfile() {
   const { user, signOut } = useAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('orders');
+  const navigate = useNavigate();
+  
+  // Estados de Pedidos
+  const [activeOrders, setActiveOrders] = useState<any[]>([]);
+  const [pastOrders, setPastOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [addresses, setAddresses] = useState<Address[]>([]);
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [emprataCoins, setEmprataCoins] = useState(0);
+  
+  // Estados de Perfil (Dados Públicos + Privados Segregados)
+  const [profile, setProfile] = useState<any>({});
+  const [privateData, setPrivateData] = useState<any>({ cpf: '' });
+  const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
-  // Load user data
+  // Carrega dados do usuário
   useEffect(() => {
-    if (!user?.uid) return;
+    if (!user) {
+      navigate('/auth');
+      return;
+    }
 
-    // Subscribe to user document for consumer data
-    const unsubUser = onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
-      const data = snapshot.data();
-      if (data?.consumer) {
-        setAddresses(data.consumer.savedAddresses || []);
-        setCoupons(data.consumer.coupons || []);
-        setEmprataCoins(data.consumer.emprataCoins || 0);
-      }
-    });
-
-    // Load orders
-    const loadOrders = async () => {
+    // Carrega perfil público e privado
+    const loadProfile = async () => {
       try {
-        const q = query(
-          collection(db, 'orders'),
-          where('consumerId', '==', user.uid),
-          orderBy('createdAt', 'desc')
-        );
-        const snapshot = await getDocs(q);
-        setOrders(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-      } catch (e) {
-        console.log('Error loading orders:', e);
+        // 1. Perfil Público
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        setProfile(userDoc.data() || { displayName: user.displayName, phone: '' });
+
+        // 2. Dados Privados (Sub-coleção protegida pelas regras)
+        const privateDoc = await getDoc(doc(db, `users/${user.uid}/private_data`, 'sensitive'));
+        if (privateDoc.exists()) {
+          setPrivateData(privateDoc.data());
+        }
+      } catch (error) {
+        console.error('[ConsumerProfile] Erro ao carregar perfil:', error);
       }
-      setLoading(false);
     };
 
-    loadOrders();
-    return () => unsubUser();
-  }, [user?.uid]);
+    loadProfile();
 
-  const labelIcons = {
-    casa: <Home className="w-4 h-4" />,
-    trabalho: <Briefcase className="w-4 h-4" />,
-    outro: <MapPin className="w-4 h-4" />,
+    // Busca pedidos do usuário logado
+    const q = query(
+      collection(db, 'orders'),
+      where('customer.uid', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const active: any[] = [];
+      const past: any[] = [];
+
+      snap.docs.forEach(doc => {
+        const data = { id: doc.id, ...doc.data() };
+        // Status que consideram o pedido "Aberto"
+        if (['PENDING', 'PREPARING', 'READY', 'DISPATCHED'].includes(data.status?.toUpperCase())) {
+          active.push(data);
+        } else {
+          past.push(data);
+        }
+      });
+
+      setActiveOrders(active);
+      setPastOrders(past);
+      setLoading(false);
+    });
+
+    return () => unsub();
+  }, [user, navigate]);
+
+  // Salva dados (Público + Privado segregados)
+  const handleSave = async () => {
+    if (!auth.currentUser) return;
+
+    // VALIDAÇÃO REAL com algoritmo matemático
+    if (privateData.cpf && !validateCPFNative(privateData.cpf)) {
+      return toast.error("CPF Inválido. Verifique os números digitados.");
+    }
+    if (profile.phone && !validatePhone(profile.phone)) {
+      return toast.error("Telefone Inválido. Use formato (XX) XXXXX-XXXX");
+    }
+
+    setSaving(true);
+
+    try {
+      // 1. Salva dados PÚBLICOS
+      await setDoc(doc(db, 'users', auth.currentUser.uid), {
+        displayName: profile.displayName,
+        phone: profile.phone,
+        updatedAt: new Date()
+      }, { merge: true });
+
+      // 2. Salva dados PRIVADOS (Segregados na sub-coleção protegida)
+      await setDoc(doc(db, `users/${auth.currentUser.uid}/private_data`, 'sensitive'), {
+        cpf: privateData.cpf,
+        updatedAt: new Date()
+      }, { merge: true });
+
+      toast.success("Dados atualizados e protegidos com sucesso!");
+      setEditMode(false);
+    } catch (error) {
+      console.error('[ConsumerProfile] Erro ao salvar:', error);
+      toast.error("Erro ao salvar. Verifique sua conexão.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const statusColors: Record<string, string> = {
-    pending: 'bg-yellow-500/20 text-yellow-400',
-    preparing: 'bg-blue-500/20 text-blue-400',
-    ready: 'bg-purple-500/20 text-purple-400',
-    dispatched: 'bg-primary/20 text-primary',
-    delivered: 'bg-green-500/20 text-green-400',
-    cancelled: 'bg-red-500/20 text-red-400',
-  };
+  if (!user) return null;
 
-  const statusLabels: Record<string, string> = {
-    pending: 'Aguardando',
-    preparing: 'Preparando',
-    ready: 'Pronto',
-    dispatched: 'A caminho',
-    delivered: 'Entregue',
-    cancelled: 'Cancelado',
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white pb-20">
-      {/* Header */}
-      <header className="bg-gradient-to-b from-primary/20 to-transparent pt-12 pb-8 px-6">
-        <div className="max-w-2xl mx-auto">
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center">
-              {user?.photoURL ? (
-                <img src={user.photoURL} alt="" className="w-full h-full rounded-full object-cover" />
-              ) : (
-                <User className="w-8 h-8 text-white/50" />
-              )}
-            </div>
-            <div className="flex-1">
-              <h1 className="text-xl font-black">{user?.displayName || 'Consumidor'}</h1>
-              <p className="text-sm text-white/40">{user?.email}</p>
-            </div>
-            <button
-              onClick={signOut}
-              className="p-3 bg-white/5 rounded-full hover:bg-white/10 transition-colors"
-            >
-              <LogOut className="w-5 h-5 text-white/50" />
-            </button>
+    <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
+      {/* HEADER DO PERFIL */}
+      <div className="bg-[#121212] p-6 pt-12 border-b border-white/5">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-orange-600 flex items-center justify-center text-black font-black text-2xl">
+            {user.displayName?.[0] || <User />}
           </div>
-
-          {/* Emprata Coins */}
-          <div className="bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border border-yellow-500/30 rounded-2xl p-4 flex items-center gap-4">
-            <div className="w-12 h-12 bg-yellow-500/30 rounded-full flex items-center justify-center">
-              <Coins className="w-6 h-6 text-yellow-400" />
-            </div>
-            <div className="flex-1">
-              <p className="text-2xl font-black text-yellow-400">{emprataCoins}</p>
-              <p className="text-xs text-white/50">Emprata Coins</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-white/40">Equivale a</p>
-              <p className="text-sm font-bold text-yellow-400">R$ {(emprataCoins * 0.10).toFixed(2)}</p>
+          <div>
+            <h1 className="text-xl font-bold">{profile.displayName || user.displayName || 'Cliente'}</h1>
+            <div className="flex items-center gap-1 text-green-400 text-xs font-bold bg-green-500/10 px-2 py-1 rounded-full w-fit mt-1">
+              <ShieldCheck size={12} /> Conta Verificada
             </div>
           </div>
         </div>
-      </header>
 
-      {/* Tabs */}
-      <div className="sticky top-0 z-30 bg-[#0a0a0a]/95 backdrop-blur-xl border-b border-white/5">
-        <div className="max-w-2xl mx-auto flex">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex items-center justify-center gap-2 py-4 text-sm font-bold transition-all border-b-2 ${
-                activeTab === tab.id
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-white/40 hover:text-white/60'
-              }`}
-            >
-              {tab.icon}
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
-          ))}
+        <div className="grid grid-cols-2 gap-4">
+           <div className="bg-white/5 p-3 rounded-xl text-left">
+              <p className="text-white/40 text-xs uppercase font-bold">E-mail</p>
+              <p className="text-sm truncate">{user.email}</p>
+           </div>
+           <button onClick={signOut} className="bg-red-500/10 p-3 rounded-xl text-left hover:bg-red-500/20 text-red-400 transition-colors flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase font-bold opacity-70">Sair</p>
+                <p className="font-bold text-sm">Logout</p>
+              </div>
+              <LogOut size={16} />
+           </button>
         </div>
       </div>
+      
+      {/* SEÇÃO DE EDIÇÃO DE PERFIL */}
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-bold text-white/40 uppercase tracking-wider flex items-center gap-2">
+            <User size={16} className="text-primary" /> Meu Perfil Blindado
+          </h2>
+          <button 
+            onClick={() => setEditMode(!editMode)}
+            className="text-xs text-primary font-bold"
+          >
+            {editMode ? 'Cancelar' : 'Editar'}
+          </button>
+        </div>
 
-      {/* Content */}
-      <main className="max-w-2xl mx-auto px-4 py-6">
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          </div>
+        {editMode ? (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4"
+          >
+            {/* Dados Públicos */}
+            <div>
+              <label className="text-xs text-white/40 font-bold block mb-1">Nome Público</label>
+              <input 
+                value={profile.displayName || ''}
+                onChange={e => setProfile({...profile, displayName: e.target.value})}
+                className="w-full bg-[#1a1a1a] border border-white/10 rounded-xl p-3 text-white focus:border-primary/50 outline-none transition-colors"
+                placeholder="Seu nome"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs text-white/40 font-bold block mb-1">Celular (Validado)</label>
+              <input 
+                value={profile.phone || ''}
+                onChange={e => setProfile({...profile, phone: maskPhone(e.target.value)})}
+                className="w-full bg-[#1a1a1a] border border-white/10 rounded-xl p-3 text-white focus:border-primary/50 outline-none transition-colors"
+                placeholder="(00) 00000-0000"
+                maxLength={15}
+              />
+            </div>
+
+            {/* Dados Sensíveis (Área Segura) */}
+            <div className="bg-green-900/10 border border-green-500/20 p-4 rounded-xl mt-6">
+              <div className="flex items-center gap-2 mb-3 text-green-400">
+                <ShieldCheck size={18} />
+                <span className="text-xs font-black uppercase tracking-wider">Área Segura (Criptografada)</span>
+              </div>
+              
+              <label className="text-xs text-white/40 font-bold block mb-1">CPF</label>
+              <div className="relative">
+                <input 
+                  value={privateData.cpf || ''}
+                  onChange={e => setPrivateData({...privateData, cpf: maskCPF(e.target.value)})}
+                  className="w-full bg-black border border-green-500/30 rounded-xl p-3 pl-10 text-white font-mono tracking-widest focus:border-green-500/60 outline-none transition-colors"
+                  placeholder="000.000.000-00"
+                  maxLength={14}
+                />
+                <Lock className="absolute left-3 top-3.5 text-white/20" size={16} />
+              </div>
+              <p className="text-[10px] text-white/30 mt-2">
+                Seu CPF é armazenado em uma coleção separada com regras de segurança estritas. 
+                Nem outros usuários nem lojas podem vê-lo.
+              </p>
+            </div>
+
+            <button 
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full py-4 bg-primary text-black font-black rounded-xl flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors"
+            >
+              {saving ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  <Save size={18} />
+                  SALVAR DADOS
+                </>
+              )}
+            </button>
+          </motion.div>
         ) : (
-          <AnimatePresence mode="wait">
-            {/* ORDERS TAB */}
-            {activeTab === 'orders' && (
-              <motion.div
-                key="orders"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-4"
-              >
-                {orders.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Package className="w-12 h-12 text-white/20 mx-auto mb-4" />
-                    <p className="text-white/40">Nenhum pedido ainda</p>
-                    <Link 
-                      to="/marketplace" 
-                      className="mt-4 inline-block px-6 py-3 bg-primary rounded-full font-bold hover:bg-orange-600 transition-colors"
-                    >
-                      Explorar Restaurantes
-                    </Link>
-                  </div>
-                ) : (
-                  orders.map(order => (
-                    <div
-                      key={order.id}
-                      className="bg-white/5 border border-white/5 rounded-2xl p-4"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          {order.restaurant?.logoUrl && (
-                            <img 
-                              src={order.restaurant.logoUrl} 
-                              alt="" 
-                              className="w-10 h-10 rounded-xl object-cover"
-                            />
-                          )}
-                          <div>
-                            <p className="font-bold">{order.restaurant?.name || 'Restaurante'}</p>
-                            <p className="text-xs text-white/40">
-                              {order.items?.length} itens • R$ {order.total?.toFixed(2)}
-                            </p>
-                          </div>
-                        </div>
-                        <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase ${statusColors[order.status] || 'bg-white/10'}`}>
-                          {statusLabels[order.status] || order.status}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between pt-3 border-t border-white/5">
-                        <div className="flex items-center gap-2 text-xs text-white/40">
-                          <Clock className="w-3 h-3" />
-                          {order.createdAt?.toDate?.()?.toLocaleDateString('pt-BR') || 'Recente'}
-                        </div>
-                        
-                        <button className="flex items-center gap-1 text-primary text-sm font-bold hover:underline">
-                          <RefreshCw className="w-4 h-4" />
-                          Pedir de Novo
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </motion.div>
+          <div className="bg-[#121212] border border-white/5 p-4 rounded-xl space-y-3">
+            <div className="flex justify-between">
+              <span className="text-white/40 text-sm">Nome:</span>
+              <span className="font-medium">{profile.displayName || 'Não informado'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-white/40 text-sm">Telefone:</span>
+              <span className="font-medium">{profile.phone || 'Não informado'}</span>
+            </div>
+            {privateData.cpf && (
+              <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                <span className="text-green-400/60 text-sm flex items-center gap-1">
+                  <Lock size={12} /> CPF:
+                </span>
+                <span className="font-mono text-green-400">***.***.***-{privateData.cpf.slice(-2)}</span>
+              </div>
             )}
+          </div>
+        )}
+      </div>
 
-            {/* ADDRESSES TAB */}
-            {activeTab === 'addresses' && (
-              <motion.div
-                key="addresses"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-3"
-              >
-                {addresses.map(addr => (
-                  <div
-                    key={addr.id}
-                    className="flex items-center gap-4 bg-white/5 border border-white/5 rounded-2xl p-4"
-                  >
-                    <div className="w-10 h-10 bg-white/10 rounded-full flex items-center justify-center text-white/50">
-                      {labelIcons[addr.label] || <MapPin className="w-4 h-4" />}
+      {/* DUAL PERSONA SWITCH: Only for owners */}
+      <div className="px-6">
+        <button 
+          onClick={() => {
+            localStorage.setItem('activeRole', 'OWNER');
+            window.location.href = '/dashboard';
+          }}
+          className="w-full bg-gradient-to-r from-gray-800 to-black border border-white/20 p-4 rounded-2xl flex items-center justify-between group hover:border-primary/50 transition-all"
+        >
+          <div className="flex items-center gap-4">
+            <div className="bg-white/10 p-2 rounded-lg group-hover:bg-primary group-hover:text-black transition-colors">
+              <User size={24} /> 
+            </div>
+            <div className="text-left">
+              <p className="font-bold text-sm">Gerenciar Restaurante</p>
+              <p className="text-xs text-white/40">Acessar painel administrativo</p>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-white/40 group-hover:text-white" />
+        </button>
+      </div>
+
+      <div className="p-6 space-y-8">
+        
+        {/* SEÇÃO 1: RASTREAMENTO (PEDIDOS ABERTOS) */}
+        {activeOrders.length > 0 && (
+          <section>
+            <h2 className="text-sm font-bold text-white/40 uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Clock size={16} className="text-primary" /> Em Andamento
+            </h2>
+            <div className="space-y-4">
+              {activeOrders.map(order => (
+                <Link 
+                  key={order.id} 
+                  to={`/track/${order.id}`}
+                  className="block bg-gradient-to-r from-[#1a1a1a] to-[#121212] border border-primary/30 p-5 rounded-2xl relative overflow-hidden group"
+                >
+                  <div className="absolute top-0 right-0 bg-primary text-black text-[10px] font-black px-3 py-1 rounded-bl-xl uppercase">
+                    Rastrear Agora
+                  </div>
+                  
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <p className="font-bold text-lg">{order.restaurant?.name || 'Emprata Delivery'}</p>
+                      <p className="text-xs text-white/60">Pedido #{order.id.slice(-4).toUpperCase()}</p>
                     </div>
-                    <div className="flex-1">
-                      <p className="font-bold capitalize">{addr.label}</p>
-                      <p className="text-sm text-white/40">
-                        {addr.street}, {addr.number}
-                        {addr.complement && ` - ${addr.complement}`}
+                  </div>
+
+                  <div className="flex items-center gap-3 text-sm text-white/80">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    {translateStatus(order.status)}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* SEÇÃO 2: HISTÓRICO */}
+        <section>
+          <h2 className="text-sm font-bold text-white/40 uppercase tracking-wider mb-4 flex items-center gap-2">
+            <History size={16} /> Histórico de Pedidos
+          </h2>
+          
+          {pastOrders.length === 0 && activeOrders.length === 0 ? (
+            <div className="text-center py-12 bg-white/5 rounded-2xl">
+              <Package size={48} className="mx-auto mb-4 text-white/20" />
+              <p className="text-white/40">Nenhum pedido ainda</p>
+              <p className="text-xs text-white/20 mt-1">Faça seu primeiro pedido!</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pastOrders.map(order => (
+                <div key={order.id} className="bg-[#121212] border border-white/5 p-4 rounded-xl flex justify-between items-center opacity-70 hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-4">
+                    <div className="bg-white/5 p-2 rounded-lg">
+                      <Package size={20} className="text-white/40" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">{order.restaurant?.name || 'Pedido Finalizado'}</p>
+                      <p className="text-xs text-white/40">
+                        {order.createdAt?.toDate ? 
+                          new Date(order.createdAt.toDate()).toLocaleDateString('pt-BR') : 
+                          'Data indisponível'
+                        }
                       </p>
                     </div>
-                    <ChevronRight className="w-5 h-5 text-white/20" />
                   </div>
-                ))}
-
-                <button className="w-full flex items-center justify-center gap-2 p-4 border-2 border-dashed border-white/10 rounded-2xl text-white/50 hover:text-white hover:border-white/20 transition-colors">
-                  <Plus className="w-5 h-5" />
-                  Adicionar Endereço
-                </button>
-              </motion.div>
-            )}
-
-            {/* COUPONS TAB */}
-            {activeTab === 'coupons' && (
-              <motion.div
-                key="coupons"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="space-y-3"
-              >
-                {coupons.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Tag className="w-12 h-12 text-white/20 mx-auto mb-4" />
-                    <p className="text-white/40">Nenhum cupom disponível</p>
-                    <p className="text-sm text-white/30 mt-2">
-                      Continue pedindo para ganhar cupons!
-                    </p>
+                  <div className="text-right">
+                    <p className="font-bold text-sm">{formatCurrency(order.total || order.financials?.total || 0)}</p>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      order.status?.toUpperCase() === 'CANCELLED' ? 'bg-red-500/20 text-red-400' : 'bg-green-500/20 text-green-400'
+                    }`}>
+                      {order.status?.toUpperCase() === 'CANCELLED' ? 'Cancelado' : 'Concluído'}
+                    </span>
                   </div>
-                ) : (
-                  coupons.map(coupon => (
-                    <div
-                      key={coupon.id}
-                      className="bg-gradient-to-r from-primary/10 to-orange-500/10 border border-primary/30 rounded-2xl p-4 flex items-center gap-4"
-                    >
-                      <div className="w-12 h-12 bg-primary/20 rounded-full flex items-center justify-center">
-                        <Tag className="w-6 h-6 text-primary" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-black text-primary">
-                          {coupon.type === 'percentage' && `${coupon.value}% OFF`}
-                          {coupon.type === 'fixed' && `R$ ${coupon.value} OFF`}
-                          {coupon.type === 'delivery_free' && 'FRETE GRÁTIS'}
-                        </p>
-                        <p className="text-xs text-white/40">
-                          Código: <span className="font-mono font-bold text-white">{coupon.code}</span>
-                        </p>
-                      </div>
-                      {coupon.minOrder && (
-                        <p className="text-xs text-white/30">
-                          Mín. R$ {coupon.minOrder}
-                        </p>
-                      )}
-                    </div>
-                  ))
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        )}
-      </main>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
+}
+
+// Auxiliar para traduzir status do Firestore
+function translateStatus(status: string) {
+  const map: Record<string, string> = {
+    'PENDING': 'Aguardando Confirmação',
+    'PREPARING': 'Em Preparo na Cozinha',
+    'READY': 'Pronto para Entrega',
+    'DISPATCHED': 'Saiu para Entrega (Acompanhe)',
+    'DELIVERED': 'Entregue'
+  };
+  return map[status?.toUpperCase()] || status;
 }

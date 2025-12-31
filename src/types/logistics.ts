@@ -20,6 +20,7 @@ export interface Driver {
   currentStatus: DriverStatus;
   totalDeliveriesToday: number;
   createdAt: any; // Firestore Timestamp
+  location?: DeliveryCoords; // Real-time location
 }
 
 // ══════════════════════════════════════════════════════════════════

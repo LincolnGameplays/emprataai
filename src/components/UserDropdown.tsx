@@ -5,7 +5,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, LogOut, ChevronDown } from 'lucide-react';
+import { User, LogOut, ChevronDown, Store } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
@@ -103,6 +103,21 @@ export function UserDropdown({}: UserDropdownProps) {
               </button>
 
 
+
+              {/* Switch to Customer Mode */}
+              <button
+                onClick={() => {
+                   localStorage.setItem('activeRole', 'CUSTOMER');
+                   window.location.href = '/delivery';
+                }}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 transition-colors text-left"
+              >
+                <Store className="w-4 h-4 text-primary" />
+                <div>
+                  <span className="text-sm font-bold text-white block">Modo Cliente</span>
+                  <span className="text-[10px] text-white/40 block">Fazer pedidos</span>
+                </div>
+              </button>
 
               {/* Logout */}
               <button
