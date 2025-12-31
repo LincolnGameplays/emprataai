@@ -2,8 +2,7 @@
 import * as admin from "firebase-admin";
 import * as crypto from "crypto";
 
-// functions/src/integrations/adapters.ts
-
+// ... (Mantenha as interfaces NormalizedOrder no topo iguais)
 interface NormalizedOrder {
   source: "IFOOD" | "RAPPI" | "UBER_EATS";
   externalId: string;
@@ -45,15 +44,16 @@ interface NormalizedOrder {
 }
 
 export function normalizeiFoodOrder(payload: any, restaurantId: string): NormalizedOrder {
-  const delivery = payload.delivery || {};
+  // BLINDAGEM: Se payload vier nulo, cria objetos vazios
+  const safePayload = payload || {};
+  const delivery = safePayload.delivery || {};
   const address = delivery.deliveryAddress || {};
-  const customer = payload.customer || {};
-  const payments = payload.payments || {};
+  const customer = safePayload.customer || {};
+  const payments = safePayload.payments || {};
 
-  // Normaliza items
-  const items = (payload.items || []).map((item: any) => ({
-    id: item.externalCode || item.id || crypto.randomUUID(), // Agora o crypto existe!
-    name: item.name,
+  const items = (safePayload.items || []).map((item: any) => ({
+    id: item.externalCode || item.id || crypto.randomUUID(),
+    name: item.name || "Item sem nome",
     quantity: item.quantity || 1,
     price: (item.unitPrice || 0) / 100,
     options: (item.options || []).map((opt: any) => ({
@@ -63,7 +63,6 @@ export function normalizeiFoodOrder(payload: any, restaurantId: string): Normali
     notes: item.observations || "",
   }));
 
-  // Calcula totais
   const subtotal = items.reduce((acc: number, i: any) =>
     acc + (i.price * i.quantity), 0
   );
@@ -73,10 +72,10 @@ export function normalizeiFoodOrder(payload: any, restaurantId: string): Normali
 
   return {
     source: "IFOOD",
-    externalId: payload.id,
+    externalId: safePayload.id || `UNKNOWN-${Date.now()}`,
     restaurantId,
     status: "PENDING",
-    paymentStatus: payload.payments?.prepaid ? "PAID" : "PENDING",
+    paymentStatus: payments.prepaid ? "PAID" : "PENDING",
     deliveryType: delivery.deliveredBy === "MERCHANT" ? "DELIVERY" : "PICKUP",
     customer: {
       name: customer.name || "Cliente iFood",
@@ -105,19 +104,20 @@ export function normalizeiFoodOrder(payload: any, restaurantId: string): Normali
       total,
     },
     estimatedDeliveryTime: delivery.estimatedDeliveryTime || 45,
-    customerNotes: payload.additionalInfo || "",
+    customerNotes: safePayload.additionalInfo || "",
     integrationMetadata: {
-      originalPayload: payload,
+      originalPayload: safePayload,
       deliveryMode: delivery.deliveredBy === "IFOOD" ? "MARKETPLACE" : "MERCHANT",
       externalDriverId: delivery.driver?.id,
-      commissionRate: 12, // Taxa média iFood
+      commissionRate: 12,
     },
     createdAt: admin.firestore.Timestamp.now(),
   };
 }
 
 export function normalizeRappiOrder(payload: any, restaurantId: string): NormalizedOrder {
-  const items = (payload.items || payload.products || []).map((item: any) => ({
+  const safePayload = payload || {};
+  const items = (safePayload.items || safePayload.products || []).map((item: any) => ({
     id: item.sku || item.id || crypto.randomUUID(),
     name: item.name,
     quantity: item.quantity || 1,
@@ -128,22 +128,22 @@ export function normalizeRappiOrder(payload: any, restaurantId: string): Normali
     })),
   }));
 
-  const address = payload.delivery_address || payload.client?.address || {};
+  const address = safePayload.delivery_address || safePayload.client?.address || {};
 
   return {
     source: "RAPPI",
-    externalId: payload.order_id || payload.id,
+    externalId: safePayload.order_id || safePayload.id || `RAPPI-${Date.now()}`,
     restaurantId,
     status: "PENDING",
-    paymentStatus: payload.payment_status === "APPROVED" ? "PAID" : "PENDING",
-    deliveryType: payload.delivery_method === "pickup" ? "PICKUP" : "DELIVERY",
+    paymentStatus: safePayload.payment_status === "APPROVED" ? "PAID" : "PENDING",
+    deliveryType: safePayload.delivery_method === "pickup" ? "PICKUP" : "DELIVERY",
     customer: {
-      name: payload.client?.name || payload.customer_name || "Cliente Rappi",
-      phone: payload.client?.phone || payload.customer_phone || "",
-      id: payload.client?.id,
+      name: safePayload.client?.name || safePayload.customer_name || "Cliente Rappi",
+      phone: safePayload.client?.phone || safePayload.customer_phone || "",
+      id: safePayload.client?.id,
     },
     deliveryAddress: {
-      street: address.street || address.address,
+      street: address.street || address.address || "Endereço Rappi",
       number: address.number || "S/N",
       complement: address.complement,
       neighborhood: address.neighborhood,
@@ -157,81 +157,80 @@ export function normalizeRappiOrder(payload: any, restaurantId: string): Normali
     },
     items,
     financials: {
-      subtotal: payload.subtotal || payload.products_total || 0,
-      deliveryFee: payload.delivery_fee || payload.delivery_cost || 0,
-      discount: payload.discount || 0,
-      total: payload.total || payload.order_total || 0,
+      subtotal: safePayload.subtotal || 0,
+      deliveryFee: safePayload.delivery_fee || 0,
+      discount: safePayload.discount || 0,
+      total: safePayload.total || safePayload.order_total || 0,
     },
-    estimatedDeliveryTime: payload.estimated_delivery_time || 40,
-    customerNotes: payload.notes || payload.comments || "",
+    estimatedDeliveryTime: safePayload.estimated_delivery_time || 40,
+    customerNotes: safePayload.notes || safePayload.comments || "",
     integrationMetadata: {
-      originalPayload: payload,
-      deliveryMode: payload.logistics === "rappi" ? "MARKETPLACE" : "MERCHANT",
-      commissionRate: 15, // Taxa média Rappi
+      originalPayload: safePayload,
+      commissionRate: 15,
     },
     createdAt: admin.firestore.Timestamp.now(),
   };
 }
 
 export function normalizeUberEatsOrder(payload: any, restaurantId: string): NormalizedOrder {
-  const items = (payload.items || payload.cart?.items || []).map((item: any) => ({
-    id: item.external_data || item.id || crypto.randomUUID(),
-    name: item.title || item.name,
-    quantity: item.quantity || 1,
-    price: item.price?.unit_price?.amount || item.price || 0,
-    options: (item.selected_modifier_groups || []).flatMap((g: any) =>
-      (g.selected_items || []).map((s: any) => ({
-        name: s.title || s.name,
-        price: s.price?.amount || 0,
-      }))
-    ),
-  }));
-
-  const delivery = payload.delivery_info || {};
-  const dropoff = delivery.dropoff_info || {};
-  const location = dropoff.location || {};
-
-  return {
-    source: "UBER_EATS",
-    externalId: payload.id || payload.display_id,
-    restaurantId,
-    status: "PENDING",
-    paymentStatus: "PAID", // UberEats sempre prepago
-    deliveryType: payload.type === "PICK_UP" ? "PICKUP" : "DELIVERY",
-    customer: {
-      name: dropoff.contact?.first_name || "Cliente UberEats",
-      phone: dropoff.contact?.phone || "",
-    },
-    deliveryAddress: {
-      street: location.street_address || location.address,
-      number: location.unit || "",
-      neighborhood: location.sub_locality || "",
-      city: location.city,
-      state: location.state,
-      zipCode: location.postal_code,
-      coordinates: location.latitude ? {
-        lat: location.latitude,
-        lng: location.longitude,
-      } : undefined,
-    },
-    items,
-    financials: {
-      subtotal: payload.cart?.total_amount || 0,
-      deliveryFee: payload.pricing?.delivery_fee || 0,
-      discount: payload.pricing?.promotions?.total_discount || 0,
-      total: payload.payment?.total?.amount || 0,
-    },
-    estimatedDeliveryTime: delivery.estimated_prep_time || 35,
-    customerNotes: payload.special_instructions || "",
-    integrationMetadata: {
-      originalPayload: payload,
-      deliveryMode: delivery.delivery_type === "DELI_PARTNER" ? "MARKETPLACE" : "MERCHANT",
-      externalDriverId: delivery.courier?.uuid,
-      commissionRate: 30, // UberEats taxa alta
-    },
-    createdAt: admin.firestore.Timestamp.now(),
-  };
-}
+    // Uber pode mandar payload vazio nos testes de webhook
+    const safePayload = payload || {};
+    const items = (safePayload.items || safePayload.cart?.items || []).map((item: any) => ({
+      id: item.external_data || item.id || crypto.randomUUID(),
+      name: item.title || item.name,
+      quantity: item.quantity || 1,
+      price: item.price?.unit_price?.amount || item.price || 0,
+      options: (item.selected_modifier_groups || []).flatMap((g: any) =>
+        (g.selected_items || []).map((s: any) => ({
+          name: s.title || s.name,
+          price: s.price?.amount || 0,
+        }))
+      ),
+    }));
+  
+    const delivery = safePayload.delivery_info || {};
+    const dropoff = delivery.dropoff_info || {};
+    const location = dropoff.location || {};
+  
+    return {
+      source: "UBER_EATS",
+      externalId: safePayload.id || safePayload.display_id || `UBER-${Date.now()}`,
+      restaurantId,
+      status: "PENDING",
+      paymentStatus: "PAID", 
+      deliveryType: safePayload.type === "PICK_UP" ? "PICKUP" : "DELIVERY",
+      customer: {
+        name: dropoff.contact?.first_name || "Cliente UberEats",
+        phone: dropoff.contact?.phone || "",
+      },
+      deliveryAddress: {
+        street: location.street_address || location.address || "Uber Location",
+        number: location.unit || "",
+        neighborhood: location.sub_locality || "",
+        city: location.city,
+        state: location.state,
+        zipCode: location.postal_code,
+        coordinates: location.latitude ? {
+          lat: location.latitude,
+          lng: location.longitude,
+        } : undefined,
+      },
+      items,
+      financials: {
+        subtotal: safePayload.cart?.total_amount || 0,
+        deliveryFee: safePayload.pricing?.delivery_fee || 0,
+        discount: safePayload.pricing?.promotions?.total_discount || 0,
+        total: safePayload.payment?.total?.amount || 0,
+      },
+      estimatedDeliveryTime: delivery.estimated_prep_time || 35,
+      customerNotes: safePayload.special_instructions || "",
+      integrationMetadata: {
+        originalPayload: safePayload,
+        commissionRate: 30,
+      },
+      createdAt: admin.firestore.Timestamp.now(),
+    };
+  }
 
 export function normalizeExternalOrder(
   source: string,
