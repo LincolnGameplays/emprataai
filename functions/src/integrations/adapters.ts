@@ -1,66 +1,48 @@
-/**
- * Integration Adapters - Normalize external orders to Emprata format
- * Converts iFood, Rappi, UberEats payloads to unified Order type
- */
 
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 
-// ══════════════════════════════════════════════════════════════════
-// COMMON TYPES
-// ══════════════════════════════════════════════════════════════════
+// functions/src/integrations/adapters.ts
 
 interface NormalizedOrder {
   source: "IFOOD" | "RAPPI" | "UBER_EATS";
   externalId: string;
   restaurantId: string;
-  status: "PENDING";
-  paymentStatus: "PENDING" | "PAID";
-  deliveryType: "DELIVERY" | "PICKUP";
+  status: string;
+  paymentStatus: string;
+  deliveryType: string;
   customer: {
     name: string;
     phone: string;
     id?: string;
+    cpf?: string;
   };
   deliveryAddress?: {
     street: string;
     number: string;
     complement?: string;
-    neighborhood: string;
-    city: string;
-    state: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
     zipCode?: string;
-    coordinates?: { lat: number; lng: number };
+    coordinates?: {
+      lat: number;
+      lng: number;
+    };
     reference?: string;
   };
-  items: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    price: number;
-    options?: Array<{ name: string; price: number }>;
-    notes?: string;
-  }>;
+  items: any[];
   financials: {
-    subtotal: number;
-    deliveryFee: number;
+    subtotal?: number;
+    deliveryFee?: number;
     discount?: number;
     total: number;
   };
   estimatedDeliveryTime?: number;
   customerNotes?: string;
-  integrationMetadata: {
-    originalPayload: unknown;
-    deliveryMode?: "MERCHANT" | "MARKETPLACE";
-    externalDriverId?: string;
-    commissionRate?: number;
-  };
-  createdAt: admin.firestore.Timestamp;
+  integrationMetadata?: any;
+  createdAt: admin.firestore.Timestamp | Date;
 }
-
-// ══════════════════════════════════════════════════════════════════
-// IFOOD ADAPTER
-// Docs: https://developer.ifood.com.br/en-US/docs/guides/modules/order/events
-// ══════════════════════════════════════════════════════════════════
 
 export function normalizeiFoodOrder(payload: any, restaurantId: string): NormalizedOrder {
   const delivery = payload.delivery || {};
@@ -70,10 +52,10 @@ export function normalizeiFoodOrder(payload: any, restaurantId: string): Normali
 
   // Normaliza items
   const items = (payload.items || []).map((item: any) => ({
-    id: item.externalCode || item.id || crypto.randomUUID(),
+    id: item.externalCode || item.id || crypto.randomUUID(), // Agora o crypto existe!
     name: item.name,
     quantity: item.quantity || 1,
-    price: (item.unitPrice || 0) / 100, // iFood envia em centavos
+    price: (item.unitPrice || 0) / 100,
     options: (item.options || []).map((opt: any) => ({
       name: opt.name,
       price: (opt.unitPrice || 0) / 100,
@@ -134,10 +116,6 @@ export function normalizeiFoodOrder(payload: any, restaurantId: string): Normali
   };
 }
 
-// ══════════════════════════════════════════════════════════════════
-// RAPPI ADAPTER
-// ══════════════════════════════════════════════════════════════════
-
 export function normalizeRappiOrder(payload: any, restaurantId: string): NormalizedOrder {
   const items = (payload.items || payload.products || []).map((item: any) => ({
     id: item.sku || item.id || crypto.randomUUID(),
@@ -194,10 +172,6 @@ export function normalizeRappiOrder(payload: any, restaurantId: string): Normali
     createdAt: admin.firestore.Timestamp.now(),
   };
 }
-
-// ══════════════════════════════════════════════════════════════════
-// UBER EATS ADAPTER
-// ══════════════════════════════════════════════════════════════════
 
 export function normalizeUberEatsOrder(payload: any, restaurantId: string): NormalizedOrder {
   const items = (payload.items || payload.cart?.items || []).map((item: any) => ({
@@ -258,10 +232,6 @@ export function normalizeUberEatsOrder(payload: any, restaurantId: string): Norm
     createdAt: admin.firestore.Timestamp.now(),
   };
 }
-
-// ══════════════════════════════════════════════════════════════════
-// GENERIC NORMALIZER
-// ══════════════════════════════════════════════════════════════════
 
 export function normalizeExternalOrder(
   source: string,

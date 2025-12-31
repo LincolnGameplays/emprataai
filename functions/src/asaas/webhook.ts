@@ -16,8 +16,20 @@ export const financeWebhook = onRequest(async (req, res) => {
   const event = req.body;
 
   try {
-    if (event.event === "PAYMENT_RECEIVED" || event.event === "PAYMENT_CONFIRMED") {
-      await handlePaymentCredit(event.payment);
+    switch (event.event) {
+      case "PAYMENT_RECEIVED":
+      case "PAYMENT_CONFIRMED":
+        await handlePaymentCredit(event.payment);
+        break;
+      
+      case "PAYMENT_OVERDUE":
+      case "PAYMENT_DELETED":
+        await handlePaymentFailed(event.payment, "EXPIRED");
+        break;
+
+      case "PAYMENT_CHARGEBACK_REQUESTED":
+        await handlePaymentFailed(event.payment, "CHARGEBACK");
+        break;
     }
     res.status(200).send({received: true});
   } catch (error) {
@@ -148,4 +160,14 @@ async function handlePaymentCredit(payment: any) {
     `[WALLET CREDIT] Restaurante ${restaurantId} | ` +
     `Venda: R$ ${grossAmount} | Lucro: R$ ${netProfit.toFixed(2)} (${profitMargin.toFixed(0)}%)`
   );
+}
+
+async function handlePaymentFailed(payment: any, reason: string) {
+  const externalRef = payment.externalReference;
+  if (externalRef && !externalRef.startsWith("SUB_")) {
+    await db.collection("orders").doc(externalRef).update({
+      paymentStatus: reason,
+      status: "CANCELLED"
+    });
+  }
 }

@@ -1,26 +1,28 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles, CloudRain, Dumbbell, Zap, Moon } from 'lucide-react';
+import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles, CloudRain, Dumbbell, Zap, Moon, MapPin, Clock } from 'lucide-react';
 import { Helmet } from 'react-helmet-async';
 import { collection, query, where, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db, auth } from '../config/firebase';
 import { Loading } from '../components/Loading';
 import { toast } from 'sonner';
 import { IMaskInput } from 'react-imask';
 import SocialProofTicker from '../components/SocialProofTicker';
 import { rewriteDescription, UserVibe, VIBE_METADATA } from '../services/neuroCopy';
 import CheckoutFlow from '../components/checkout/CheckoutFlow';
+import { getDynamicMenu, filterMenuByVibe } from '../services/dynamicMenu';
+import { ProductStories } from '../components/ProductStories';
+import { Menu } from '../types/menu';
+import { useRestaurantMetrics } from '../hooks/useRestaurantMetrics';
+import { calculateDistance, formatDistance } from '../utils/geo';
 
 // Interfaces simplificadas para o componente
-interface MenuItem {
-  id: string;
-  title: string;
-  description: string;
-  price: number;
-  imageUrl: string;
+// Interfaces simplificadas para o componente
+import type { MenuItem as BaseMenuItem } from '../types/menu';
+
+interface MenuItem extends BaseMenuItem {
   category: string;
-  isHighlight?: boolean;
 }
 
 interface CartItem extends MenuItem {
@@ -39,21 +41,53 @@ interface OrderSuccess {
 export default function PublicMenu() {
   const { slug } = useParams();
   const [searchParams] = useSearchParams();
+  const tableId = searchParams.get('table');
   const [loading, setLoading] = useState(true);
   const [restaurant, setRestaurant] = useState<any>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [activeCategory, setActiveCategory] = useState('Todos');
+  const [processedMenu, setProcessedMenu] = useState<any>(null);
+  const [stories, setStories] = useState<MenuItem[]>([]);
   
   // Estado do Carrinho e Checkout
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
-  const [customer, setCustomer] = useState({ name: '', cpf: '', table: '', phone: '' });
+  const [customer, setCustomer] = useState({ name: '', cpf: '', table: tableId || '', phone: '', address: '' });
   const [customerConfirmed, setCustomerConfirmed] = useState(false);
   
   // Order Success State (with delivery PIN)
+  // Order Success State (with delivery PIN)
   const [orderSuccess, setOrderSuccess] = useState<OrderSuccess | null>(null);
+
+  // Real Data State
+  const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [distance, setDistance] = useState<string | null>(null);
+  const { metrics, loading: metricsLoading } = useRestaurantMetrics(restaurant?.ownerId);
+  
+  // 1. Pegar Geolocalização Real do Cliente
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        });
+      });
+    }
+  }, []);
+
+  // 2. Calcular Distância Real
+  useEffect(() => {
+    if (userLocation && restaurant?.location?.lat) {
+      const dist = calculateDistance(
+        userLocation.lat, userLocation.lng,
+        restaurant.location.lat, restaurant.location.lng
+      );
+      setDistance(formatDistance(dist));
+    }
+  }, [userLocation, restaurant]);
   
   // Neuro-Copywriting State
   const [currentVibe, setCurrentVibe] = useState<UserVibe>('standard');
@@ -61,6 +95,15 @@ export default function PublicMenu() {
   
   // Deep Link handler - prevent double-trigger
   const deepLinkProcessed = useRef(false);
+
+  // Vibe Colors Dynamic
+  const vibeColors = {
+    standard: 'from-orange-500/10 to-transparent',
+    comfort: 'from-blue-500/10 to-transparent',
+    fitness: 'from-green-500/10 to-transparent',
+    energy: 'from-yellow-500/10 to-transparent',
+    late_night: 'from-purple-500/10 to-transparent'
+  };
 
   // Neuro-Copywriting Effect
   useEffect(() => {
@@ -73,10 +116,8 @@ export default function PublicMenu() {
       const itemsToOptimize = menuItems.slice(0, 10);
 
       for (const item of itemsToOptimize) {
-        // Loading placeholder
         setOptimizedDescriptions(prev => ({ ...prev, [item.id]: '✨ Personalizando...' }));
         
-        // Actual AI rewrite
         const newText = await rewriteDescription(item.title, item.description, currentVibe);
         setOptimizedDescriptions(prev => ({ ...prev, [item.id]: newText }));
       }
@@ -89,7 +130,6 @@ export default function PublicMenu() {
   useEffect(() => {
     const fetchMenu = async () => {
       try {
-        // 1. Buscar Restaurante pelo Slug
         const q = query(collection(db, 'menus'), where('slug', '==', slug));
         const snapshot = await getDocs(q);
         
@@ -99,22 +139,42 @@ export default function PublicMenu() {
           return;
         }
 
-        const menuData = snapshot.docs[0].data();
+        const menuData = snapshot.docs[0].data() as Menu;
         setRestaurant(menuData);
 
-        // 2. Organizar Itens
-        const items: MenuItem[] = [];
-        const cats = new Set<string>();
+        // Apply Dynamic Logic
+        const dynamicMenu = getDynamicMenu(menuData);
         
-        menuData.categories.forEach((cat: any) => {
-          cats.add(cat.title);
-          cat.items.forEach((item: any) => {
-            items.push({ ...item, category: cat.title });
-          });
-        });
+        if (dynamicMenu) {
+            setProcessedMenu(dynamicMenu);
+            
+            // Extract stories (Highlights from dynamic menu)
+            // We need to map items to include category for the flattened view
+            const allItemsValues: MenuItem[] = dynamicMenu.categories.flatMap((c: any) => 
+              c.items.map((i: any) => ({ ...i, category: c.title }))
+            );
 
-        setMenuItems(items);
-        setCategories(['Todos', ...Array.from(cats)]);
+            setStories(allItemsValues.filter(i => i.isHighlight).slice(0, 10)); // Top 10 highlights
+
+            // Populate flat items for other uses
+            setMenuItems(allItemsValues);
+
+            // Update categories based on dynamic order
+            setCategories(['Todos', ...dynamicMenu.categories.map(c => c.title)]);
+        } else {
+             const items: MenuItem[] = [];
+             const cats = new Set<string>();
+             
+             menuData.categories.forEach(cat => {
+               cats.add(cat.title);
+               cat.items.forEach(item => {
+                 items.push({ ...item, category: cat.title });
+               });
+             });
+     
+             setMenuItems(items);
+             setCategories(['Todos', ...Array.from(cats)]);
+        }
       } catch (error) {
         console.error(error);
       } finally {
@@ -125,21 +185,47 @@ export default function PublicMenu() {
     if (slug) fetchMenu();
   }, [slug]);
 
-  // ══════════════════════════════════════════════════════════════════
-  // DEEP LINK HANDLER - Auto-add item from URL parameter
-  // URL: /menu/[slug]?add_item=[itemId]
-  // ══════════════════════════════════════════════════════════════════
+  // Vibe Filter Effect
+  useEffect(() => {
+    if (!restaurant) return;
+    
+    // START: Filter logic
+    let filtered = restaurant; 
+    
+    // We need to re-apply dynamic sorting to the filtered result ideally, 
+    // or just filter the already dynamic menu.
+    // For simplicity, let's filter the originally loaded menu and re-dynamic it, 
+    // or just filter the items visible. 
+    
+    // Actually, `filterMenuByVibe` takes a Menu.
+    const vibeMenu = filterMenuByVibe(restaurant, currentVibe);
+    const sortedVibeMenu = getDynamicMenu(vibeMenu);
+    
+    if (sortedVibeMenu) {
+        setProcessedMenu(sortedVibeMenu);
+        const allItems = sortedVibeMenu.categories.flatMap((c: any) => c.items);
+        setMenuItems(allItems);
+        
+        // Update tabs if categories become empty? Maybe keep all.
+        // Let's keep distinct categories from the filtered result
+        const validCats = ['Todos', ...sortedVibeMenu.categories.map((c: any) => c.title)];
+        setCategories(validCats);
+        if (!validCats.includes(activeCategory)) setActiveCategory('Todos');
+    }
+    // END: Filter logic
+
+  }, [currentVibe, restaurant]);
+
+  // DEEP LINK HANDLER
   useEffect(() => {
     const addItemId = searchParams.get('add_item');
     
-    // Only process once, when items are loaded
     if (addItemId && menuItems.length > 0 && !deepLinkProcessed.current) {
       const targetItem = menuItems.find(item => item.id === addItemId);
       
       if (targetItem) {
         deepLinkProcessed.current = true;
         
-        // Add to cart with promotional toast
         setCart(prev => {
           const existing = prev.find(i => i.id === targetItem.id);
           if (existing) {
@@ -149,15 +235,12 @@ export default function PublicMenu() {
         });
         
         setIsCartOpen(true);
-        toast.success('🔥 Oferta ativada! Item adicionado ao carrinho.', {
-          duration: 4000,
-          icon: '🎉'
-        });
+        toast.success('🔥 Oferta ativada!', { icon: '🎉' });
       }
     }
   }, [menuItems, searchParams]);
 
-  // Lógica do Carrinho
+  // Logic Helpers
   const addToCart = (item: MenuItem) => {
     setCart(prev => {
       const existing = prev.find(i => i.id === item.id);
@@ -166,8 +249,8 @@ export default function PublicMenu() {
       }
       return [...prev, { ...item, cartId: crypto.randomUUID(), quantity: 1, notes: '' }];
     });
+    // Add pulsing feedback here implicitly via UI state update
     toast.success(`${item.title} adicionado!`);
-    setIsCartOpen(true);
   };
 
   const removeFromCart = (cartId: string) => {
@@ -186,49 +269,7 @@ export default function PublicMenu() {
 
   const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
 
-  // Finalizar Pedido
-  const handleCheckout = async () => {
-    if (!customer.name || !customer.cpf) {
-      toast.error("Por favor, preencha nome e CPF");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // Generate 4-digit delivery PIN for security
-      const deliveryPin = Math.floor(1000 + Math.random() * 9000).toString();
-      
-      const orderRef = await addDoc(collection(db, 'orders'), {
-        restaurantId: restaurant.ownerId,
-        customer,
-        items: cart,
-        total: cartTotal,
-        status: 'pending',
-        createdAt: serverTimestamp(),
-        paymentMethod: 'pix', // Default por enquanto
-        isOrderBumpAccepted: false,
-        deliveryPin // Security PIN for delivery confirmation
-      });
-
-      // Show success screen with PIN
-      setOrderSuccess({
-        orderId: orderRef.id,
-        deliveryPin,
-        total: cartTotal
-      });
-      
-      setCart([]);
-      setIsCheckoutOpen(false);
-      setIsCartOpen(false);
-    } catch (e) {
-      toast.error("Erro ao enviar pedido");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle checkout with payment data from CheckoutFlow
+  // Final Checkout
   const handleCheckoutFinal = async (paymentData: any) => {
     try {
       setLoading(true);
@@ -236,18 +277,18 @@ export default function PublicMenu() {
       
       const orderRef = await addDoc(collection(db, 'orders'), {
         restaurantId: restaurant.ownerId,
-        customer,
+        customer: {
+          ...customer,
+          uid: auth.currentUser?.uid || null
+        },
         items: cart,
         total: cartTotal,
-        
-        // Payment data from CheckoutFlow
         paymentMethod: paymentData.paymentMethod,
         paymentStatus: paymentData.paymentStatus || 'pending',
-        
-        // CORREÇÃO: Se for undefined, envia null (Firestore não aceita undefined)
         changeFor: paymentData.changeFor ?? null, 
         paymentId: paymentData.paymentId ?? null, 
-        
+        source: tableId ? 'QR_TABLE' : 'WEB_DELIVERY',
+        tableId: tableId || null,
         status: 'pending',
         createdAt: serverTimestamp(),
         deliveryPin,
@@ -275,40 +316,75 @@ export default function PublicMenu() {
   if (loading) return <Loading />;
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white pb-24">
+    <div className={`min-h-screen bg-[#050505] text-white pb-32 transition-colors duration-700`}>
       <Helmet>
         <title>{restaurant?.name || 'Cardápio'} | Emprata.ai</title>
       </Helmet>
 
-      {/* SOCIAL PROOF TICKER - Living Menu */}
-      {restaurant?.id && (
-        <SocialProofTicker restaurantId={restaurant.id} />
-      )}
+      {/* Dynamic Background Gradient based on Vibe */}
+      <div className={`fixed inset-0 bg-gradient-to-b ${vibeColors[currentVibe]} opacity-30 pointer-events-none transition-all duration-1000`} />
 
-      {/* HEADER CINEMATOGRÁFICO */}
-      <div className="relative h-64 w-full overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#0a0a0a] z-10" />
+      {/* HEADER ULTRA-IMMERSIVE (Glassmorphism) */}
+      <div className="relative h-[40vh] w-full overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/60 to-transparent z-10" />
         <img 
-          src={restaurant?.coverUrl || "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1200&q=80"} 
-          className="w-full h-full object-cover opacity-50"
+          src={restaurant?.coverUrl || "https://images.unsplash.com/photo-1559339352-11d035aa65de?w=1200&q=80"} 
+          className="w-full h-full object-cover scale-105 animate-slow-zoom"
         />
-        <div className="absolute bottom-0 left-0 p-6 z-20 w-full">
-          <h1 className="text-4xl font-black italic tracking-tighter mb-2">{restaurant?.name}</h1>
-          <p className="text-white/60 line-clamp-2 max-w-lg">{restaurant?.description}</p>
+        <div className="absolute top-0 left-0 w-full p-6 z-20 flex justify-between items-start">
+           <div className="bg-black/30 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 text-xs font-bold uppercase tracking-widest flex items-center gap-2">
+             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+             {tableId ? `Mesa ${tableId}` : 'Delivery Online'}
+           </div>
+        </div>
+        <div className="absolute bottom-0 left-0 p-8 z-20 w-full max-w-4xl mx-auto">
+           {/* TAGS REAIS */}
+            <div className="flex gap-2 mb-2">
+              {metrics.isNew ? (
+                 <span className="bg-blue-500 text-white px-2 py-0.5 rounded text-[10px] font-bold uppercase">
+                   Novo
+                 </span>
+              ) : (
+                 <span className="bg-yellow-500 text-black px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1">
+                   <Star size={10} className="fill-black"/> {metrics.rating}
+                 </span>
+              )}
+
+              {/* Distância Real */}
+              {distance && (
+                 <span className="bg-black/50 backdrop-blur text-white border border-white/10 px-2 py-0.5 rounded text-[10px] font-bold uppercase flex items-center gap-1">
+                   <MapPin size={10}/> {distance}
+                 </span>
+              )}
+            </div>
+
+          <motion.h1 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-5xl md:text-7xl font-black italic tracking-tighter mb-4 text-transparent bg-clip-text bg-gradient-to-r from-white to-white/50"
+          >
+            {restaurant?.name}
+          </motion.h1>
+          <div className="flex items-center gap-4 text-sm font-bold text-white/50">
+             <span className="flex items-center gap-1"><Clock size={16} /> 30-45 min</span>
+          </div>
         </div>
       </div>
 
-      {/* CATEGORIAS (STICKY) */}
-      <div className="sticky top-0 z-30 bg-[#0a0a0a]/90 backdrop-blur-md border-b border-white/5 py-4 px-6 overflow-x-auto">
-        <div className="flex gap-3">
+      {/* TICKER DE PROVA SOCIAL REAL */}
+      <SocialProofTicker metrics={metrics} />
+
+      {/* CATEGORIAS (Floating Glass) */}
+      <div className="sticky top-4 z-30 px-4 mb-8">
+        <div className="bg-black/60 backdrop-blur-xl border border-white/10 p-2 rounded-full flex gap-2 overflow-x-auto no-scrollbar shadow-2xl">
           {categories.map(cat => (
             <button
               key={cat}
               onClick={() => setActiveCategory(cat)}
-              className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap transition-all ${
+              className={`px-6 py-3 rounded-full text-xs font-black uppercase tracking-wider whitespace-nowrap transition-all ${
                 activeCategory === cat 
-                  ? 'bg-primary text-white shadow-lg shadow-primary/20' 
-                  : 'bg-white/5 text-white/60 hover:bg-white/10'
+                  ? 'bg-white text-black shadow-lg shadow-white/20 scale-105' 
+                  : 'text-white/60 hover:text-white hover:bg-white/5'
               }`}
             >
               {cat}
@@ -317,369 +393,224 @@ export default function PublicMenu() {
         </div>
       </div>
 
-      {/* NEURO-COPYWRITING VIBE SELECTOR */}
-      <div className="bg-[#121212] py-6 px-4 border-b border-white/5">
-        <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-3 text-center">
-          Como você está se sentindo hoje?
+      {/* NEURO-VIBE (Mood Selector) */}
+      <div className="max-w-md mx-auto mb-10 px-6">
+        <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.2em] text-center mb-4">
+          Personalize sua experiência
         </p>
-        <div className="flex justify-center gap-3 overflow-x-auto pb-2 no-scrollbar">
-          <button 
-            onClick={() => setCurrentVibe('comfort')} 
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'comfort' ? 'bg-white/10 border-blue-500 text-white' : 'border-white/10 text-white/40'}`}
-          >
-            <CloudRain className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Frio/Chuva</span>
-          </button>
-
-          <button 
-            onClick={() => setCurrentVibe('fitness')} 
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'fitness' ? 'bg-white/10 border-green-500 text-white' : 'border-white/10 text-white/40'}`}
-          >
-            <Dumbbell className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Fitness</span>
-          </button>
-
-          <button 
-            onClick={() => setCurrentVibe('energy')} 
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'energy' ? 'bg-white/10 border-orange-500 text-white' : 'border-white/10 text-white/40'}`}
-          >
-            <Zap className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Fome Monstro</span>
-          </button>
-
-          <button 
-            onClick={() => setCurrentVibe('late_night')} 
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all min-w-[80px] ${currentVibe === 'late_night' ? 'bg-white/10 border-purple-500 text-white' : 'border-white/10 text-white/40'}`}
-          >
-            <Moon className="w-5 h-5" />
-            <span className="text-[10px] font-bold">Larica</span>
-          </button>
+        <div className="flex justify-center gap-4">
+           {[
+             { id: 'standard', icon: <ChefHat />, label: 'Normal' },
+             { id: 'late_night', icon: <Moon />, label: 'Larica' },
+             { id: 'fitness', icon: <Dumbbell />, label: 'Fit' },
+             { id: 'energy', icon: <Zap />, label: 'Fome' }
+           ].map((vibe) => (
+             <button
+               key={vibe.id}
+               onClick={() => setCurrentVibe(vibe.id as UserVibe)}
+               className={`p-3 rounded-2xl border transition-all ${
+                 currentVibe === vibe.id 
+                 ? 'bg-white/10 border-white text-white scale-110 shadow-xl shadow-white/10' 
+                 : 'bg-transparent border-white/5 text-white/30 hover:bg-white/5'
+               }`}
+             >
+               {vibe.icon}
+             </button>
+           ))}
         </div>
       </div>
 
-      {/* GRID DE ITENS (BENTO STYLE) */}
-      <div className="max-w-4xl mx-auto p-6 grid md:grid-cols-2 gap-6">
+      {/* STORIES */}
+      <ProductStories items={stories} onItemClick={(item) => addToCart({ ...item, category: 'Stories' })} />
+
+      {/* BENTO GRID MENU */}
+      <div className="max-w-5xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {menuItems
           .filter(i => activeCategory === 'Todos' || i.category === activeCategory)
-          .map((item) => (
+          .map((item, index) => (
           <motion.div 
             key={item.id}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            className="group bg-white/5 border border-white/5 rounded-3xl p-4 flex gap-4 hover:bg-white/10 transition-all cursor-pointer"
+            initial={{ opacity: 0, scale: 0.95 }}
+            whileInView={{ opacity: 1, scale: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: index * 0.05 }}
+            className={`group relative overflow-hidden rounded-[2rem] border border-white/5 hover:border-white/20 transition-all bg-[#121212] ${
+               index % 5 === 0 ? 'md:col-span-2 md:row-span-2' : '' // Bento logic: Highlight first item of bunch
+            }`}
             onClick={() => addToCart(item)}
           >
-            {/* Imagem Quadrada Perfeita */}
-            <div className="w-28 h-28 shrink-0 rounded-2xl overflow-hidden relative">
-              <img src={item.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-            </div>
-            
-            <div className="flex-1 flex flex-col justify-between">
-              <div>
-                <div className="flex justify-between items-start">
-                  <h3 className="font-bold text-lg leading-tight mb-1">{item.title}</h3>
-                  <span className="text-primary font-black">R$ {item.price.toFixed(2)}</span>
-                </div>
-                <p className={`text-xs leading-relaxed line-clamp-2 transition-all duration-300 ${optimizedDescriptions[item.id] ? 'text-primary/80' : 'text-white/40'}`}>
-                  {optimizedDescriptions[item.id] || item.description}
-                </p>
-              </div>
+            {/* Image Layer */}
+            <div className={`w-full ${index % 5 === 0 ? 'h-96' : 'h-64'} relative`}>
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent z-10 opacity-90" />
+              <img 
+                src={item.imageUrl || ''} 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 grayscale-[0.3] group-hover:grayscale-0" 
+              />
               
-              <button className="mt-2 w-full py-2 bg-white/5 rounded-xl text-xs font-bold uppercase hover:bg-primary hover:text-white transition-colors flex items-center justify-center gap-2">
-                <Plus className="w-3 h-3" /> Adicionar
+              {/* Floating Price Tag */}
+              <div className="absolute top-4 right-4 z-20 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-white/10">
+                 <span className="text-white font-black">R$ {item.price.toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Content Layer */}
+            <div className="absolute bottom-0 left-0 w-full p-6 z-20">
+              <h3 className={`font-black italic leading-none mb-2 ${index % 5 === 0 ? 'text-4xl' : 'text-xl'}`}>
+                {item.title}
+              </h3>
+              <p className={`text-white/60 mb-4 line-clamp-2 text-sm ${index % 5 === 0 ? 'max-w-md' : ''}`}>
+                 {optimizedDescriptions[item.id] || item.description}
+              </p>
+              
+              <button className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-primary opacity-0 group-hover:opacity-100 transform translate-y-4 group-hover:translate-y-0 transition-all duration-300">
+                <Plus className="w-4 h-4" /> Adicionar à sacola
               </button>
             </div>
           </motion.div>
         ))}
       </div>
 
-      {/* FLOATING ACTION BUTTON (CART) */}
+      {/* FLOATING CART CTA */}
       <AnimatePresence>
         {cart.length > 0 && (
           <motion.div 
-            initial={{ y: 100 }}
-            animate={{ y: 0 }}
-            exit={{ y: 100 }}
-            className="fixed bottom-6 inset-x-0 px-6 z-40 max-w-md mx-auto"
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-8 left-0 right-0 z-40 px-6 flex justify-center"
           >
             <button 
               onClick={() => setIsCartOpen(true)}
-              className="w-full bg-primary text-white p-4 rounded-2xl shadow-2xl shadow-primary/30 flex items-center justify-between"
+              className="bg-primary text-white pl-6 pr-2 py-2 rounded-full shadow-[0_0_40px_rgba(255,100,0,0.4)] flex items-center gap-4 hover:scale-105 transition-transform active:scale-95"
             >
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm">
-                  {cart.reduce((a,b) => a + b.quantity, 0)}
-                </div>
-                <span className="font-bold uppercase tracking-wider text-sm">Ver Sacola</span>
+              <span className="font-black uppercase tracking-widest text-sm">Ver Sacola</span>
+              <div className="bg-white text-black font-black w-10 h-10 rounded-full flex items-center justify-center">
+                {cart.reduce((a,b) => a + b.quantity, 0)}
               </div>
-              <span className="font-black text-lg">R$ {cartTotal.toFixed(2)}</span>
             </button>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* CART DRAWER */}
+      {/* CART DRAWER (Modern Glass) */}
       {isCartOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsCartOpen(false)} />
+        <>
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => setIsCartOpen(false)} />
           <motion.div 
             initial={{ x: '100%' }}
             animate={{ x: 0 }}
-            className="relative w-full max-w-md bg-[#121212] h-full shadow-2xl flex flex-col"
+            exit={{ x: '100%' }}
+            className="fixed top-0 right-0 z-50 h-full w-full max-w-sm bg-[#121212] flex flex-col items-center border-l border-white/10"
           >
-            <div className="p-6 border-b border-white/5 flex justify-between items-center">
-              <h2 className="text-xl font-black italic">Sua Sacola</h2>
-              <button onClick={() => setIsCartOpen(false)}><X /></button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              {cart.map(item => (
-                <div key={item.cartId} className="flex gap-4">
-                  <img src={item.imageUrl} className="w-16 h-16 rounded-xl object-cover" />
-                  <div className="flex-1">
-                    <h4 className="font-bold text-sm">{item.title}</h4>
-                    <p className="text-primary font-bold text-sm mb-2">R$ {item.price.toFixed(2)}</p>
-                    <div className="flex items-center gap-3 bg-white/5 w-fit rounded-lg p-1">
-                      <button onClick={() => updateQuantity(item.cartId, -1)} className="p-1 hover:text-primary"><Minus size={14} /></button>
-                      <span className="text-xs font-bold w-4 text-center">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.cartId, 1)} className="p-1 hover:text-primary"><Plus size={14} /></button>
+             <div className="w-full p-6 flex items-center justify-between border-b border-white/5">
+                <h2 className="text-xl font-black italic">Seu Pedido</h2>
+                <button onClick={() => setIsCartOpen(false)} className="bg-white/5 p-2 rounded-full hover:bg-white/20"><X size={20}/></button>
+             </div>
+             
+             <div className="flex-1 w-full overflow-y-auto p-6 space-y-4">
+               {cart.map(item => (
+                 <div key={item.cartId} className="bg-white/5 rounded-2xl p-4 flex gap-4 border border-white/5">
+                     <img src={item.imageUrl || ''} className="w-16 h-16 rounded-xl object-cover" />
+                    <div className="flex-1">
+                       <h4 className="font-bold text-sm leading-tight mb-1">{item.title}</h4>
+                       <span className="text-primary text-xs font-black">R$ {item.price.toFixed(2)}</span>
                     </div>
-                  </div>
-                  <button onClick={() => removeFromCart(item.cartId)} className="text-white/20 hover:text-red-500 self-start"><X size={16} /></button>
-                </div>
-              ))}
-            </div>
+                    <div className="flex flex-col items-center bg-black/40 rounded-lg p-1 gap-2">
+                       <button onClick={() => updateQuantity(item.cartId, 1)} className="hover:text-primary"><Plus size={14}/></button>
+                       <span className="text-xs font-bold">{item.quantity}</span>
+                       <button onClick={() => updateQuantity(item.cartId, -1)} className="hover:text-primary"><Minus size={14}/></button>
+                    </div>
+                 </div>
+               ))}
+             </div>
 
-            <div className="p-6 bg-white/5 space-y-4">
-              <div className="flex justify-between text-xl font-black">
-                <span>Total</span>
-                <span className="text-primary">R$ {cartTotal.toFixed(2)}</span>
-              </div>
-              <button 
-                onClick={() => { setIsCartOpen(false); setIsCheckoutOpen(true); }}
-                className="w-full py-4 bg-green-500 hover:bg-green-600 rounded-xl font-black uppercase tracking-widest transition-all"
-              >
-                Finalizar Pedido
-              </button>
-            </div>
+             <div className="w-full p-6 bg-gradient-to-t from-black to-transparent">
+                <div className="flex justify-between items-end mb-6">
+                   <span className="text-white/60 text-sm">Total a pagar</span>
+                   <span className="text-3xl font-black text-white">R$ {cartTotal.toFixed(2)}</span>
+                </div>
+                <button 
+                  onClick={() => { setIsCartOpen(false); setIsCheckoutOpen(true); }}
+                  className="w-full py-4 bg-white text-black rounded-xl font-black uppercase tracking-widest hover:scale-[1.02] transition-transform"
+                >
+                  Continuar
+                </button>
+             </div>
           </motion.div>
-        </div>
+        </>
       )}
 
-      {/* CHECKOUT MODAL - Two-Step: Identification → Payment */}
+      {/* CHECKOUT FLOW (Context Aware) */}
       {isCheckoutOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          {/* Step 1: Customer Identification */}
-          {!customerConfirmed ? (
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="bg-[#18181b] w-full max-w-md rounded-3xl p-8 border border-white/10"
-            >
-              <h2 className="text-2xl font-black italic mb-6">Identificação</h2>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">Seu Nome</label>
-                  <input 
-                    type="text" 
-                    value={customer.name}
-                    onChange={e => setCustomer({...customer, name: e.target.value})}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold"
-                    placeholder="Ex: João Silva"
-                  />
-                </div>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-xl">
+           {!customerConfirmed ? (
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="w-full max-w-md bg-[#121212] rounded-3xl p-8 border border-white/10 relative">
+               <button onClick={() => setIsCheckoutOpen(false)} className="absolute top-4 right-4 text-white/40"><X /></button>
+               
+               <h2 className="text-2xl font-black italic mb-2">Identifique-se</h2>
+               <p className="text-white/40 text-sm mb-6">Para emitir sua nota e acompanhar o pedido.</p>
 
-                <div>
-                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">CPF (Nota Fiscal)</label>
-                  <IMaskInput
-                    mask="000.000.000-00"
-                    value={customer.cpf}
-                    unmask={false}
-                    onAccept={(value: string) => setCustomer({ ...customer, cpf: value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold placeholder:text-white/20"
-                    placeholder="000.000.000-00"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">Telefone</label>
-                  <IMaskInput
-                    mask="(00) 00000-0000"
-                    value={customer.phone || ''}
-                    onAccept={(value: string) => setCustomer({ ...customer, phone: value })}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold placeholder:text-white/20"
-                    placeholder="(00) 00000-0000"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase text-white/40 mb-2">Mesa (Opcional)</label>
-                  <input 
-                    type="text" 
-                    value={customer.table}
-                    onChange={e => setCustomer({...customer, table: e.target.value})}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl p-4 focus:border-primary outline-none font-bold"
-                    placeholder="Ex: 05"
-                  />
-                </div>
-
-                <button 
-                  onClick={() => {
-                    if (!customer.name || !customer.cpf) {
-                      toast.error("Por favor, preencha nome e CPF");
-                      return;
-                    }
-                    setCustomerConfirmed(true);
-                  }}
-                  className="w-full py-4 bg-primary rounded-xl font-black uppercase tracking-widest mt-6 flex items-center justify-center gap-2"
-                >
-                  Ir para Pagamento <ArrowRight className="w-5 h-5" />
-                </button>
+               <div className="space-y-4">
+                 <input placeholder="Seu Nome" value={customer.name} onChange={e => setCustomer({...customer, name: e.target.value})} className="w-full bg-black border border-white/10 rounded-xl p-4 outline-none focus:border-primary text-white" />
                  
-                <button 
-                  onClick={() => setIsCheckoutOpen(false)}
-                  className="w-full py-3 text-white/40 font-bold text-xs uppercase hover:text-white"
-                >
-                  Voltar
-                </button>
-              </div>
-            </motion.div>
-          ) : (
-            /* Step 2: Payment Selection */
-            <div className="w-full max-w-md relative">
-              <button 
-                onClick={() => setCustomerConfirmed(false)}
-                className="absolute -top-12 left-0 text-white/40 hover:text-white flex items-center gap-2 text-xs font-bold uppercase"
-              >
-                <ArrowRight className="w-4 h-4 rotate-180" /> Voltar
-              </button>
+                 <IMaskInput mask="000.000.000-00" placeholder="CPF" value={customer.cpf} unmask={false} onAccept={(val) => setCustomer({...customer, cpf: val})} className="w-full bg-black border border-white/10 rounded-xl p-4 outline-none focus:border-primary text-white" />
+                 
+                 <IMaskInput mask="(00) 00000-0000" placeholder="WhatsApp" value={customer.phone} onAccept={(val) => setCustomer({...customer, phone: val})} className="w-full bg-black border border-white/10 rounded-xl p-4 outline-none focus:border-primary text-white" />
+                 
+                 {/* CONTEXT AWARE: Show Table or Address */}
+                 {tableId ? (
+                   <div className="bg-primary/10 border border-primary/50 text-primary p-4 rounded-xl flex items-center gap-3">
+                     <MapPin className="w-5 h-5" />
+                     <span className="font-bold text-sm">Você está na Mesa {tableId}</span>
+                   </div>
+                 ) : (
+                    <input placeholder="Endereço Completo" value={customer.address} onChange={e => setCustomer({...customer, address: e.target.value})} className="w-full bg-black border border-white/10 rounded-xl p-4 outline-none focus:border-primary text-white" />
+                 )}
 
-              <CheckoutFlow 
-                order={{
-                  id: `order_${Date.now()}`,
-                  total: cartTotal,
-                  restaurantId: restaurant?.ownerId,
-                  customer: {
-                    name: customer.name,
-                    cpf: customer.cpf,
-                    phone: customer.phone || ''
-                  },
-                  items: cart
-                }}
-                onSuccess={handleCheckoutFinal}
-                onCancel={() => {
-                  setCustomerConfirmed(false);
-                  setIsCheckoutOpen(false);
-                }}
-              />
-            </div>
-          )}
+                 <button onClick={() => {
+                   if(customer.name && customer.cpf) setCustomerConfirmed(true);
+                   else toast.error('Dados incompletos');
+                 }} className="w-full bg-white text-black py-4 rounded-xl font-black uppercase tracking-widest mt-4">
+                   Ir para Pagamento
+                 </button>
+               </div>
+             </motion.div>
+           ) : (
+              <div className="w-full max-w-md">
+                 <CheckoutFlow 
+                   order={{
+                     id: `order_${Date.now()}`,
+                     total: cartTotal,
+                     restaurantId: restaurant?.ownerId,
+                     customer: {
+                       name: customer.name,
+                       cpf: customer.cpf,
+                       phone: customer.phone || ''
+                     },
+                     items: cart
+                   }}
+                   onSuccess={handleCheckoutFinal}
+                   onCancel={() => setCustomerConfirmed(false)}
+                 />
+              </div>
+           )}
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════ */}
-      {/* ORDER SUCCESS MODAL - With Delivery PIN */}
-      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* SUCCESS SCREEN */}
       {orderSuccess && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center p-6"
-        >
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: 'spring', damping: 15 }}
-            className="max-w-md w-full text-center"
-          >
-            {/* Success Icon */}
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.2, type: 'spring' }}
-              className="w-24 h-24 mx-auto mb-6 rounded-full bg-green-500/20 flex items-center justify-center"
-            >
-              <CheckCircle className="w-12 h-12 text-green-400" />
-            </motion.div>
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col items-center justify-center p-6 text-center">
+            <CheckCircle className="w-24 h-24 text-green-500 mb-6" />
+            <h1 className="text-4xl font-black italic mb-2">Pedido Recebido!</h1>
+            <p className="text-white/60 mb-8 max-w-xs">{tableId ? 'Acompanhe pelo painel da mesa.' : 'Um entregador aceitará seu pedido em breve.'}</p>
+            
+            <div className="bg-white/5 p-8 rounded-3xl border border-white/10 mb-8">
+              <p className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">PIN DE ENTREGA</p>
+              <p className="text-5xl font-black text-primary tracking-[0.2em]">{orderSuccess.deliveryPin}</p>
+            </div>
 
-            <motion.h2
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="text-3xl font-black mb-2"
-            >
-              Pedido Confirmado! 🎉
-            </motion.h2>
-
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.4 }}
-              className="text-white/60 mb-8"
-            >
-              Seu pedido foi enviado para a cozinha
-            </motion.p>
-
-            {/* Delivery PIN Card */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="bg-gradient-to-br from-primary/20 to-orange-600/10 border border-primary/30 rounded-3xl p-6 mb-6"
-            >
-              <div className="flex items-center justify-center gap-2 text-primary mb-4">
-                <Sparkles className="w-5 h-5" />
-                <p className="text-sm font-bold uppercase tracking-wider">
-                  Código de Recebimento
-                </p>
-              </div>
-
-              {/* Giant PIN Display */}
-              <div className="flex justify-center gap-3 mb-4">
-                {orderSuccess.deliveryPin.split('').map((digit, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.6 + i * 0.1 }}
-                    className="w-14 h-16 bg-black/50 border-2 border-primary rounded-xl flex items-center justify-center"
-                  >
-                    <span className="text-3xl font-black text-white">{digit}</span>
-                  </motion.div>
-                ))}
-              </div>
-
-              <p className="text-xs text-white/50">
-                Informe este código ao entregador para receber seu pedido
-              </p>
-            </motion.div>
-
-            {/* Order Info */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
-              className="bg-white/5 rounded-xl p-4 mb-6 text-left"
-            >
-              <div className="flex justify-between text-sm">
-                <span className="text-white/60">Total do Pedido</span>
-                <span className="font-bold text-green-400">R$ {orderSuccess.total.toFixed(2)}</span>
-              </div>
-            </motion.div>
-
-            {/* New Order Button */}
-            <motion.button
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 1 }}
-              onClick={() => setOrderSuccess(null)}
-              className="w-full py-4 bg-white/10 hover:bg-white/20 rounded-xl font-bold transition-colors"
-            >
-              Fazer Novo Pedido
-            </motion.button>
-          </motion.div>
-        </motion.div>
+            <button onClick={() => setOrderSuccess(null)} className="text-white/50 hover:text-white font-bold text-sm uppercase">Fazer novo pedido</button>
+        </div>
       )}
     </div>
   );

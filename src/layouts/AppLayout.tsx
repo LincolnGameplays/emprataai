@@ -1,14 +1,10 @@
-/**
- * AppLayout - Elegant Management App Shell
- * Desktop sidebar + Mobile bottom bar + Animated transitions
- */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, Camera, UtensilsCrossed, Users, Settings,
-  Menu, X, ChevronRight, DollarSign
+  Menu, X, ChevronRight, DollarSign, Bike, ChefHat
 } from 'lucide-react';
 
 import { useAuth } from '../hooks/useAuth';
@@ -29,8 +25,10 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { path: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
-  { path: '/studio', label: 'Estúdio IA', icon: <Camera className="w-5 h-5" /> },
+  { path: '/dispatch', label: 'Entregas', icon: <Bike className="w-5 h-5" /> }, // Nova Aba
+  { path: '/kitchen-display', label: 'Cozinha', icon: <ChefHat className="w-5 h-5" /> }, // Nova Aba
   { path: '/menu-builder', label: 'Cardápio', icon: <UtensilsCrossed className="w-5 h-5" /> },
+  { path: '/studio', label: 'Estúdio IA', icon: <Camera className="w-5 h-5" /> },
   { path: '/finance', label: 'Financeiro', icon: <DollarSign className="w-5 h-5" />, ownerOnly: true },
   { path: '/staff', label: 'Equipe', icon: <Users className="w-5 h-5" />, ownerOnly: true },
   { path: '/profile', label: 'Configurações', icon: <Settings className="w-5 h-5" /> },
@@ -38,7 +36,9 @@ const NAV_ITEMS: NavItem[] = [
 
 // Page titles
 const PAGE_TITLES: Record<string, string> = {
-  '/dashboard': 'Dashboard',
+  '/dashboard': 'Visão Geral',
+  '/dispatch': 'Gestão de Entregas',
+  '/kitchen-display': 'Monitor de Cozinha (KDS)',
   '/studio': 'Estúdio de Criação',
   '/menu-builder': 'Construtor de Cardápio',
   '/finance': 'Gestão Financeira',
@@ -79,7 +79,6 @@ function Sidebar({ items }: { items: NavItem[] }) {
           >
             {({ isActive }) => (
               <>
-                {/* Active indicator */}
                 {isActive && (
                   <motion.div
                     layoutId="sidebar-indicator"
@@ -117,13 +116,8 @@ function Sidebar({ items }: { items: NavItem[] }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════
-// BOTTOM BAR COMPONENT (Mobile)
-// ══════════════════════════════════════════════════════════════════
-
 function BottomBar({ items }: { items: NavItem[] }) {
-  // Limit to 5 items for mobile
-  const mobileItems = items.slice(0, 5);
+  const mobileItems = items.slice(0, 5); // Mostra os 5 primeiros no mobile
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 h-20 bg-[#0a0a0a]/95 backdrop-blur-xl border-t border-white/5 flex items-center justify-around px-2 z-50">
@@ -155,24 +149,16 @@ function BottomBar({ items }: { items: NavItem[] }) {
   );
 }
 
-// ══════════════════════════════════════════════════════════════════
-// HEADER COMPONENT
-// ══════════════════════════════════════════════════════════════════
-
 function Header({ title }: { title: string }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
   return (
     <header className="h-16 lg:h-20 flex items-center justify-between px-4 lg:px-8 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-white/5 sticky top-0 z-30">
-      {/* Mobile menu button */}
       <button 
         className="lg:hidden p-2 -ml-2 text-white/60 hover:text-white"
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
       >
         {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
       </button>
-
-      {/* Page Title */}
       <div className="lg:flex-1">
         <motion.h1 
           key={title}
@@ -183,38 +169,22 @@ function Header({ title }: { title: string }) {
           {title}
         </motion.h1>
       </div>
-
-      {/* User Dropdown */}
       <UserDropdown />
     </header>
   );
 }
 
-// ══════════════════════════════════════════════════════════════════
-// MAIN LAYOUT COMPONENT
-// ══════════════════════════════════════════════════════════════════
-
 export default function AppLayout() {
   const location = useLocation();
   const { user } = useAuth();
-  
-  // Filter nav items based on user role (for now, show all to authenticated users)
   const filteredNavItems = NAV_ITEMS;
-  
-  // Get current page title
   const pageTitle = PAGE_TITLES[location.pathname] || 'Emprata.ai';
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
-      {/* Desktop Sidebar */}
       <Sidebar items={filteredNavItems} />
-
-      {/* Main Content Area */}
       <div className="lg:ml-64 min-h-screen flex flex-col pb-20 lg:pb-0">
-        {/* Header */}
         <Header title={pageTitle} />
-
-        {/* Page Content with Transitions */}
         <main className="flex-1">
           <AnimatePresence mode="wait">
             <motion.div
@@ -230,20 +200,9 @@ export default function AppLayout() {
           </AnimatePresence>
         </main>
       </div>
-
-      {/* Mobile Bottom Bar */}
       <BottomBar items={filteredNavItems} />
-
-      {/* ══════════════════════════════════════════════════════════════════ */}
-      {/* GLOBAL WIDGETS */}
-      {/* ══════════════════════════════════════════════════════════════════ */}
-      
-      {/* Onboarding Tour (runs on first visit) */}
       <OnboardingTour />
-      
-      {/* Smart Help Widget (floating ? button) */}
       <SmartHelp />
     </div>
   );
 }
-

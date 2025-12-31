@@ -13,61 +13,95 @@ interface ChargeRequest {
   customerData: {
     name: string;
     cpfCnpj: string;
+    phone?: string;
   };
   restaurantId: string;
+  card?: {
+    holder: string;
+    number: string;
+    expiry: string;
+    cvv: string;
+  };
 }
 
 export const financeCharge = onCall(async (request) => {
   const data = request.data as ChargeRequest;
   const auth = request.auth;
 
+  // 1. Segurança: Usuário precisa estar logado
   if (!auth) throw new HttpsError("unauthenticated", "Login necessário");
 
-  // 1. Validação Básica (Sem exigir Asaas Wallet ID - Modelo Agregador)
+  // 2. Validação: Restaurante existe?
   const restaurantDoc = await db.collection("users").doc(data.restaurantId).get();
+
   if (!restaurantDoc.exists) {
     throw new HttpsError("not-found", "Restaurante não encontrado.");
   }
 
-  // NÃO VERIFICAMOS MAIS O asaasWalletId POIS É MODELO AGREGADOR
-  // O dinheiro cai na conta dona da API Key (Sua conta Mestra)
-  // O Webhook cuida de dar o saldo virtual para o restaurante
+  // NOTA: No modelo Agregador, NÃO verificamos asaasWalletId nem fazemos Split.
+  // O dinheiro entra integralmente na conta da API Key (Sua conta Mestra).
 
   try {
-    // 2. Busca/Criação do Cliente
+    // 3. Gestão do Cliente no Asaas (Evita duplicação buscando por CPF)
     const customerPayload = {
       name: data.customerData.name,
       cpfCnpj: data.customerData.cpfCnpj,
+      phone: data.customerData.phone,
     };
 
-    const customerSearch = await axios.get(
-      `${ASAAS_CONFIG.baseUrl}/customers?cpfCnpj=${data.customerData.cpfCnpj}`,
-      {headers: {access_token: ASAAS_CONFIG.apiKey}}
-    );
-
     let customerId;
-    if (customerSearch.data.data?.length > 0) {
-      customerId = customerSearch.data.data[0].id;
-    } else {
-      const newCustomer = await axios.post(
-        `${ASAAS_CONFIG.baseUrl}/customers`,
-        customerPayload,
+
+    try {
+      const customerSearch = await axios.get(
+        `${ASAAS_CONFIG.baseUrl}/customers?cpfCnpj=${data.customerData.cpfCnpj}`,
         {headers: {access_token: ASAAS_CONFIG.apiKey}}
       );
-      customerId = newCustomer.data.id;
+
+      if (customerSearch.data.data?.length > 0) {
+        customerId = customerSearch.data.data[0].id;
+      } else {
+        const newCustomer = await axios.post(
+          `${ASAAS_CONFIG.baseUrl}/customers`,
+          customerPayload,
+          {headers: {access_token: ASAAS_CONFIG.apiKey}}
+        );
+        customerId = newCustomer.data.id;
+      }
+    } catch (err) {
+      console.error("Erro ao buscar/criar cliente Asaas:", err);
+      throw new Error("Erro ao registrar cliente no sistema financeiro.");
     }
 
-    // 3. COBRANÇA SIMPLIFICADA (SEM SPLIT)
-    // O dinheiro cai na conta dona da API Key (Sua conta Mestra)
-    const paymentPayload = {
+    // 4. Criação da Cobrança (Pix ou Cartão)
+    const paymentPayload: any = {
       customer: customerId,
       billingType: data.billingType,
       value: data.amount,
       dueDate: new Date().toISOString().split("T")[0],
       description: `Pedido ${data.orderId}`,
       externalReference: data.orderId,
-      // split: [...] <--- REMOVIDO: O dinheiro entra todo pra você, o Webhook calcula o repasse.
+      remoteIp: request.rawRequest.ip, // Crucial para Antifraude do Asaas
+      // split: [] <--- REMOVIDO: O dinheiro cai 100% pra você
     };
+
+    // Adiciona dados do Cartão se for Crédito
+    if (data.billingType === "CREDIT_CARD" && data.card) {
+      paymentPayload.creditCard = {
+        holderName: data.card.holder,
+        number: data.card.number.replace(/\s/g, ""),
+        expiryMonth: data.card.expiry.split("/")[0],
+        expiryYear: "20" + data.card.expiry.split("/")[1],
+        ccv: data.card.cvv,
+      };
+      
+      paymentPayload.creditCardHolderInfo = {
+        name: data.customerData.name,
+        email: `${data.restaurantId}@emprata.ai`, // Email fake ou real do cliente
+        cpfCnpj: data.customerData.cpfCnpj,
+        postalCode: "00000000", // Ideal coletar endereço para evitar chargeback
+        phone: data.customerData.phone || "00000000000",
+      };
+    }
 
     const paymentRes = await axios.post(
       `${ASAAS_CONFIG.baseUrl}/payments`,
@@ -77,7 +111,7 @@ export const financeCharge = onCall(async (request) => {
 
     const payment = paymentRes.data;
 
-    // 4. Pix QrCode
+    // 5. Se for PIX, recupera o QR Code / Copia e Cola
     let pixData = null;
     if (data.billingType === "PIX") {
       const qrRes = await axios.get(
@@ -97,11 +131,12 @@ export const financeCharge = onCall(async (request) => {
   } catch (error: unknown) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const err = error as any;
-    console.error("[CHARGE ERROR]", err.response?.data || err);
-    // Retorna erro específico do Asaas se disponível
-    const msg = err.response?.data?.errors?.[0]?.description ||
-                err.response?.data?.message ||
-                "Falha ao processar transação financeira.";
+    console.error("[CHARGE CRITICAL ERROR]", err.response?.data || err);
+
+    // Extrai mensagem de erro detalhada do Asaas se existir
+    const asaasError = err.response?.data?.errors?.[0]?.description;
+    const msg = asaasError || "Falha ao processar transação financeira.";
+
     throw new HttpsError("internal", msg);
   }
 });

@@ -25,6 +25,10 @@ import {
   isSlugAvailable 
 } from '../services/menuService';
 import { enhanceDescription, organizeMenuStructure } from '../services/menuAi';
+import { generateNewDescription } from '../services/neuroCopy';
+
+import { analyzePricing } from '../services/businessAi';
+import { MiniStudioModal } from '../components/MiniStudioModal';
 
 // ══════════════════════════════════════════════════════════════════
 // HELPER: Generate unique IDs
@@ -160,7 +164,25 @@ export default function MenuBuilder() {
   const [showQR, setShowQR] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [isOrganizing, setIsOrganizing] = useState(false);
+
   const [editingItem, setEditingItem] = useState<{ catId: string; itemId: string } | null>(null);
+
+  // Studio Modal State
+  const [showStudioModal, setShowStudioModal] = useState(false);
+  const [studioTarget, setStudioTarget] = useState<{ catId: string; itemId: string } | null>(null);
+
+  const handleOpenStudio = (catId: string, itemId: string) => {
+    setStudioTarget({ catId, itemId });
+    setShowStudioModal(true);
+  };
+
+  const handleStudioImageReady = (url: string) => {
+    if (studioTarget) {
+      updateItem(studioTarget.catId, studioTarget.itemId, { imageUrl: url });
+      setStudioTarget(null);
+      toast.success('Imagem aplicada com sucesso! 📸');
+    }
+  };
 
   // Load existing menu or create new
   useEffect(() => {
@@ -382,6 +404,47 @@ export default function MenuBuilder() {
   // ════════════════════════════════════════════════════════════════
   // AI: AUTO-ORGANIZE
   // ════════════════════════════════════════════════════════════════
+
+  // ════════════════════════════════════════════════════════════════
+  // AI: AUTO-COMPLETE (Name -> Desc -> Price)
+  // ════════════════════════════════════════════════════════════════
+
+  const handleItemNameBlur = async (catId: string, itemId: string, name: string) => {
+    if (!name || name.length < 3) return;
+
+    // Find item to check if it needs auto-complete (empty desc/price)
+    const item = menu?.categories.find(c => c.id === catId)?.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    // Only auto-fill if description is empty or very short
+    const shouldGenerateDesc = !item.description || item.description.length < 10;
+    
+    if (shouldGenerateDesc) {
+      toast.promise(
+        async () => {
+          // 1. Generate Description
+          const desc = await generateNewDescription(name);
+          updateItem(catId, itemId, { description: desc });
+
+          // 2. Suggest Price
+          const analysis = await analyzePricing(desc || name, 50); // 50% target margin default
+          if (analysis?.suggestedPrice) {
+            updateItem(catId, itemId, { 
+              description: desc,
+              price: analysis.suggestedPrice,
+              costPrice: analysis.costEstimate
+            } as any);
+            return `Sugestão: R$ ${analysis.suggestedPrice.toFixed(2)}`;
+          }
+        },
+        {
+          loading: 'IA Criando prato...',
+          success: (msg) => `${msg || 'Prato criado com IA!'}`,
+          error: 'Erro na IA'
+        }
+      );
+    }
+  };
 
   const handleAutoOrganize = async () => {
     if (!menu) return;
@@ -647,14 +710,20 @@ export default function MenuBuilder() {
                       {cat.items.map((item) => (
                         <div key={item.id} className="p-4 flex items-start gap-4">
                           {/* Image */}
-                          <div className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 flex-shrink-0 relative">
+                          <div 
+                            onClick={() => handleOpenStudio(cat.id, item.id)}
+                            className="w-16 h-16 rounded-xl overflow-hidden bg-white/5 flex-shrink-0 relative cursor-pointer group"
+                          >
                             {item.imageUrl ? (
                               <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
                             ) : (
-                              <div className="w-full h-full flex items-center justify-center">
+                              <div className="w-full h-full flex items-center justify-center group-hover:bg-white/10 transition-colors">
                                 <ImageIcon className="w-6 h-6 text-white/20" />
                               </div>
                             )}
+                            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <Wand2 className="w-4 h-4 text-white" />
+                            </div>
                             {item.isHighlight && (
                               <div className="absolute top-1 right-1 bg-yellow-500 rounded-full p-0.5">
                                 <Sparkles className="w-3 h-3 text-black" />
@@ -668,8 +737,9 @@ export default function MenuBuilder() {
                               type="text"
                               value={item.title}
                               onChange={(e) => updateItem(cat.id, item.id, { title: e.target.value })}
+                              onBlur={(e) => handleItemNameBlur(cat.id, item.id, e.target.value)}
                               className="w-full bg-transparent text-sm font-bold text-white focus:outline-none"
-                              placeholder="Nome do prato"
+                              placeholder="Nome do prato (ex: X-Bacon)"
                             />
                             <div className="flex items-center gap-2">
                               <textarea
@@ -786,6 +856,12 @@ export default function MenuBuilder() {
       </div>
 
       {/* QR Code Modal */}
+      <MiniStudioModal 
+        isOpen={showStudioModal}
+        onClose={() => setShowStudioModal(false)}
+        onImageReady={handleStudioImageReady}
+      />
+      
       <AnimatePresence>
         {showQR && (
           <motion.div 

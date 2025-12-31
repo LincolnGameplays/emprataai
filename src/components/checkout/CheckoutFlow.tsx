@@ -38,10 +38,12 @@ interface CheckoutFlowProps {
 }
 
 interface PixData {
-  pixQrCode?: string;
-  pixCopyPaste?: string;
+  // Campos retornados pelo backend financeCharge
+  pixCode?: string;      // Copia e Cola
+  pixImage?: string;     // QR Code Base64
   paymentId?: string;
-  riskLevel?: string;
+  invoiceUrl?: string;
+  success?: boolean;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -100,6 +102,7 @@ export default function CheckoutFlow({ order, onSuccess, onCancel }: CheckoutFlo
   const [step, setStep] = useState<Step>('method');
   const [method, setMethod] = useState<PaymentMethod | ''>('');
   const [changeFor, setChangeFor] = useState('');
+  const [cardData, setCardData] = useState({ holder: '', number: '', expiry: '', cvv: '' });
   const [pixData, setPixData] = useState<PixData | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,8 +136,14 @@ export default function CheckoutFlow({ order, onSuccess, onCancel }: CheckoutFlo
         orderId: order.id || `temp_${Date.now()}`,
         amount: order.total,
         restaurantId: order.restaurantId,
-        customer: order.customer,
-        paymentMethod: method,
+        // CORREÇÃO: Backend espera customerData com cpfCnpj
+        customerData: {
+          name: order.customer.name,
+          cpfCnpj: order.customer.cpf.replace(/\D/g, ''), // Remove formatação do CPF
+        },
+        // CORREÇÃO: Backend espera billingType em CAIXA ALTA
+        billingType: method === 'pix_online' ? 'PIX' : 'CREDIT_CARD',
+        card: method === 'credit_online' ? cardData : undefined,
       });
 
       const data = result.data as PixData;
@@ -164,8 +173,8 @@ export default function CheckoutFlow({ order, onSuccess, onCancel }: CheckoutFlo
   // ════════════════════════════════════════════════════════════════
 
   const handleCopyPix = () => {
-    if (pixData?.pixCopyPaste) {
-      navigator.clipboard.writeText(pixData.pixCopyPaste);
+    if (pixData?.pixCode) {
+      navigator.clipboard.writeText(pixData.pixCode);
       setCopied(true);
       toast.success('Código Pix copiado!');
       setTimeout(() => setCopied(false), 3000);
@@ -227,6 +236,39 @@ export default function CheckoutFlow({ order, onSuccess, onCancel }: CheckoutFlo
                   </div>
                 </button>
               ))}
+
+              {method === 'credit_online' && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3 mt-4 p-4 bg-white/5 rounded-2xl border border-white/10">
+                  <input 
+                    placeholder="Nome no Cartão" 
+                    onChange={e => setCardData({...cardData, holder: e.target.value})}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-primary text-white"
+                  />
+                  <IMaskInput
+                    mask="0000 0000 0000 0000"
+                    placeholder="0000 0000 0000 0000"
+                    onAccept={(val) => setCardData({...cardData, number: val})}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-primary text-white"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <IMaskInput
+                      mask="00/00"
+                      placeholder="MM/AA"
+                      onAccept={(val) => setCardData({...cardData, expiry: val})}
+                      className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-primary text-white"
+                    />
+                    <IMaskInput
+                      mask="000"
+                      placeholder="CVV"
+                      onAccept={(val) => setCardData({...cardData, cvv: val})}
+                      className="w-full bg-black/50 border border-white/10 rounded-xl p-3 text-sm outline-none focus:border-primary text-white"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] text-white/40 justify-center">
+                    <Shield size={12} /> Seus dados são criptografados e processados pelo Asaas
+                  </div>
+                </motion.div>
+              )}
 
               {/* Delivery Options */}
               <p className="text-xs font-black uppercase tracking-widest text-white/40 mt-6 mb-2">
@@ -315,10 +357,10 @@ export default function CheckoutFlow({ order, onSuccess, onCancel }: CheckoutFlo
               className="text-center py-4"
             >
               {/* QR Code */}
-              {pixData.pixQrCode && (
+              {pixData.pixImage && (
                 <div className="bg-white p-4 rounded-2xl inline-block mb-6 shadow-xl">
                   <img
-                    src={`data:image/png;base64,${pixData.pixQrCode}`}
+                    src={`data:image/png;base64,${pixData.pixImage}`}
                     alt="Pix QR Code"
                     className="w-48 h-48"
                   />
@@ -326,11 +368,11 @@ export default function CheckoutFlow({ order, onSuccess, onCancel }: CheckoutFlo
               )}
 
               {/* Copy Paste */}
-              {pixData.pixCopyPaste && (
+              {pixData.pixCode && (
                 <div className="bg-white/5 p-4 rounded-2xl border border-white/10 flex items-center gap-3 mb-6">
                   <input
                     readOnly
-                    value={pixData.pixCopyPaste}
+                    value={pixData.pixCode}
                     className="bg-transparent text-xs w-full text-white/50 truncate font-mono"
                   />
                   <button

@@ -78,6 +78,45 @@ export async function rewriteDescription(
     console.error("[NeuroCopy] Error:", error);
     return originalDesc;
   }
+
+}
+
+// ══════════════════════════════════════════════════════════════════
+// GENERATE NEW DESCRIPTION (ZERO SHOT)
+// ══════════════════════════════════════════════════════════════════
+
+/**
+ * Generates a fresh description for a new item name
+ */
+export async function generateNewDescription(
+  itemName: string,
+  vibe: UserVibe = 'standard'
+): Promise<string> {
+  if (!API_KEY) return "Delicioso prato da casa.";
+
+  try {
+    const prompt = `
+      Atue como um Copywriter Gastronômico de elite.
+      
+      Crie uma descrição curta e viciante para o prato: "${itemName}".
+      
+      CONTEXTO/VIBE: ${VIBE_PROMPTS[vibe]}
+      
+      REGRAS:
+      - Máximo 100 caracteres
+      - Use 1 emoji
+      - Foco em sabor e desejo
+      - Português Brasileiro
+      
+      Retorne APENAS o texto.
+    `;
+
+    const result = await model.generateContent(prompt);
+    return result.response.text().trim().replace(/^"|"$/g, '');
+  } catch (error) {
+    console.error("[NeuroCopy] Error:", error);
+    return "Uma deliciosa opção para você.";
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════

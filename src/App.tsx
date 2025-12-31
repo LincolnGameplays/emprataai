@@ -1,7 +1,5 @@
-/**
- * Emprata.ai Routes v5.0 - Tools Hub Edition
- */
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 
 // Layouts
@@ -38,23 +36,16 @@ import ConsumerProfile from './pages/marketplace/ConsumerProfile';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
-import NetworkStatus from './components/NetworkStatus';
 import CheckoutModal from './components/CheckoutModal';
 
 // Hooks
 import { usePendingCheckout } from './hooks/usePendingCheckout';
 
-// ============================================================================
-// AUTH WRAPPER - Monitora checkout pendente após login
-// ============================================================================
 function AuthWrapper({ children }: { children: React.ReactNode }) {
   const { pendingPlan, clearPending } = usePendingCheckout();
-
   return (
     <>
       {children}
-      
-      {/* SE HOUVER PLANO PENDENTE APÓS LOGIN, O MODAL APARECE AQUI */}
       {pendingPlan && (
         <CheckoutModal
           isOpen={!!pendingPlan}
@@ -74,114 +65,52 @@ export default function App() {
         position="top-center"
         richColors
         toastOptions={{
-          style: {
-            background: '#18181b',
-            border: '1px solid rgba(255,255,255,0.1)',
-            color: '#fff',
-          },
+          style: { background: '#18181b', border: '1px solid rgba(255,255,255,0.1)', color: '#fff' },
         }}
       />
       
       <AuthWrapper>
       <Routes>
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* ROTAS PÚBLICAS (Sem Layout) */}
-        {/* ══════════════════════════════════════════════════════════ */}
+        {/* ROTAS PÚBLICAS */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/auth" element={<LoginPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
-        
-        {/* Cardápio Público */}
         <Route path="/menu/:slug" element={<PublicMenu />} />
-        
-        {/* Marketplace (Consumer App) */}
         <Route path="/marketplace" element={<MarketplaceHome />} />
         <Route path="/delivery" element={<MarketplaceHome />} />
         <Route path="/me" element={<ConsumerProfile />} />
-        
-        {/* Delivery Tracking (Public) */}
         <Route path="/track/:orderId" element={<DeliveryTracking />} />
 
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* WAITER MODE (Layout Próprio) */}
-        {/* ══════════════════════════════════════════════════════════ */}
+        {/* MODOS DEDICADOS (Sem Layout Padrão) */}
         <Route path="/waiter-login" element={<WaiterLogin />} />
         <Route path="/waiter-mode" element={<WaiterApp />} />
-
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* KITCHEN DISPLAY SYSTEM (Fullscreen) */}
-        {/* ══════════════════════════════════════════════════════════ */}
-        <Route path="/kitchen/:restaurantId" element={<KitchenDisplay />} />
         <Route path="/kitchen-mode" element={<KitchenDisplay />} />
+        <Route path="/driver-mode" element={<DriverApp />} />
+        {/* Rota pública da cozinha (opcional, para usar em TV separada) */}
+        <Route path="/kitchen/:restaurantId" element={<KitchenDisplay />} />
 
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* ÁREA LOGADA COM APP LAYOUT */}
-        {/* ══════════════════════════════════════════════════════════ */}
-        <Route 
-          element={
-            <ProtectedRoute>
-              <AppLayout />
-            </ProtectedRoute>
-          }
-        >
-          {/* Dashboard Principal */}
+        {/* ÁREA LOGADA (Com Sidebar) */}
+        <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />
-          
-          {/* Construtor de Cardápio */}
           <Route path="/menu-builder" element={<MenuBuilder />} />
-          
-          {/* Gestão de Equipe */}
           <Route path="/staff" element={<StaffManagement />} />
-          
-          {/* Perfil / Configurações */}
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/admin/profile" element={<UserProfile />} />
-          
-          {/* Gestão Financeira */}
           <Route path="/finance" element={<FinanceDashboard />} />
-          
-          {/* Sucesso Pagamento */}
           <Route path="/success" element={<SuccessPage />} />
-          
-          {/* QR Print Studio */}
           <Route path="/print-qr" element={<QrPrint />} />
-          
-          {/* Tools Hub - Central de Ferramentas */}
           <Route path="/tools" element={<ToolsHub />} />
-          
-          {/* WhatsApp Tool */}
           <Route path="/tools/whatsapp" element={<WhatsappTool />} />
           
-          {/* Logistics Dispatch Console */}
-          <Route path="/logistics/dispatch" element={<DispatchConsole />} />
+          {/* ✅ CORREÇÃO: Rotas simplificadas para bater com a Sidebar */}
+          <Route path="/dispatch" element={<DispatchConsole />} />
+          <Route path="/kitchen-display" element={<KitchenDisplay />} />
         </Route>
 
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* DRIVER MODE (Fullscreen - Sem AppLayout) */}
-        {/* ══════════════════════════════════════════════════════════ */}
-        <Route path="/driver-mode" element={<DriverApp />} />
-
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* STUDIO (Fullscreen - Sem AppLayout) */}
-        {/* ══════════════════════════════════════════════════════════ */}
-        <Route 
-          path="/studio" 
-          element={
-            <ProtectedRoute>
-              <AppStudio />
-            </ProtectedRoute>
-          } 
-        />
-
-        {/* ══════════════════════════════════════════════════════════ */}
-        {/* REDIRECTS & 404 */}
-        {/* ══════════════════════════════════════════════════════════ */}
-        
-        {/* Compatibilidade: /app → /studio */}
+        {/* STUDIO (Tela Cheia) */}
+        <Route path="/studio" element={<ProtectedRoute><AppStudio /></ProtectedRoute>} />
         <Route path="/app" element={<Navigate to="/studio" replace />} />
-        
-        {/* 404 */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
       </AuthWrapper>

@@ -2,9 +2,10 @@
  * Emprata.ai - Firebase Cloud Functions
  * Main Entry Point - Marketplace & Finance Edition
  * ✅ Usando Firebase Functions V2
+ * ⚡ OTIMIZADO: Apenas funções essenciais para liberar quota
  */
 
-import {onCall, HttpsError} from "firebase-functions/v2/https";
+import {onCall} from "firebase-functions/v2/https";
 import {setGlobalOptions} from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 
@@ -12,11 +13,11 @@ import * as admin from "firebase-admin";
 // OTIMIZAÇÃO DE QUOTA (Evita erro de CPU Exceeded)
 // ============================================================================
 setGlobalOptions({
-  maxInstances: 10,      // No máximo 10 cópias rodando (padrão é 100)
-  concurrency: 80,       // 1 CPU atende 80 chamadas simultâneas
-  memory: "256MiB",      // Memória mínima
-  cpu: 1,                // 1 vCPU apenas
-  region: "southamerica-east1", // São Paulo
+  region: "southamerica-east1", // São Paulo 🇧🇷
+  maxInstances: 10,
+  concurrency: 80,
+  memory: "512MiB",
+  cpu: 1,
 });
 
 // Inicializa Admin SDK
@@ -24,119 +25,52 @@ if (!admin.apps.length) {
   admin.initializeApp();
 }
 
-const db = admin.firestore();
-
 // ============================================================================
-// EXPORT ASAAS MODULES (Financeiro Completo)
+// MÓDULOS CRÍTICOS (ESSENCIAIS PARA O CHECKOUT)
 // ============================================================================
 
-export * from "./asaas/onboard";
-export * from "./asaas/charge";
-export * from "./asaas/webhook";
-export * from "./asaas/subscribe";
-export * from "./asaas/wallet";
-export * from "./asaas/documents";
-export * from "./asaas/bank";
-export * from "./asaas/security";
+export * from "./asaas/charge"; // ESSENCIAL: Cobrança Pix
+export * from "./asaas/webhook"; // ESSENCIAL: Confirmação de Pagamento
+export * from "./asaas/wallet"; // ESSENCIAL: Saldo e Saque
+export * from "./asaas/bank"; // ESSENCIAL: Salvar Chave Pix
 
 // ============================================================================
-// EXPORT AI MODULES (Inteligência Artificial)
+// INTEGRAÇÃO IFOOD/RAPPI (ESSENCIAL)
 // ============================================================================
 
-export * from "./ai/dynamicMenu";
+// 1. Importe explicitamente primeiro
+import { deliveryHubWebhook as deliveryHubWebhookFn } from "./integrations/webhook";
+
+// 2. Exporte com o nome que você quer na nuvem
+export const deliveryHubWebhook = deliveryHubWebhookFn;
 
 // ============================================================================
-// EXPORT KITCHEN MODULES (Controle de Cozinha)
+// NOTIFICAÇÕES & PEDIDOS
 // ============================================================================
-
-export * from "./kitchen/throttle";
-
-// ============================================================================
-// EXPORT LOGISTICS MODULES (Otimização de Entregas)
-// ============================================================================
-
-export {smartBatch} from "./logistics/smartBatch";
-export {acceptBatchRoute, getAvailableBatchRoutes} from "./logistics/batchActions";
+export {onOrderCreated} from "./orders/notifications";
 
 // ============================================================================
-// EXPORT INTEGRATIONS MODULES (iFood, Rappi, UberEats)
+// MÓDULOS SECUNDÁRIOS (DESATIVADOS PARA LIBERAR QUOTA)
+// Descomente quando precisar, mas lembre de deletar as funções primeiro
 // ============================================================================
 
-export {deliveryHubWebhook} from "./integrations/webhook";
+// export * from "./asaas/onboard";    // Onboarding de subconta (não usado no modelo agregador)
+// export * from "./asaas/subscribe";  // Assinaturas (pode fazer manual no painel)
+// export * from "./asaas/documents";  // Upload de documentos (não precisa no agregador)
+// export * from "./asaas/security";   // Funções de segurança extras
+// export * from "./ai/dynamicMenu";   // Menu Dinâmico com IA (futuro)
+// export * from "./kitchen/throttle"; // Kitchen Throttling (futuro)
+// export {smartBatch} from "./logistics/smartBatch"; // Smart Batching (futuro)
+// export {acceptBatchRoute, getAvailableBatchRoutes} from "./logistics/batchActions";
 
 // ============================================================================
-// UTILS
+// FUNÇÃO MÍNIMA (Health Check)
 // ============================================================================
 
-export const addCreditsManually = onCall(async (request) => {
-  const {data, auth} = request;
-
-  if (!auth) {
-    throw new HttpsError("unauthenticated", "User must be authenticated");
-  }
-
-  const {userId, credits} = data;
-
-  await db.collection("users").doc(userId).update({
-    credits: admin.firestore.FieldValue.increment(credits),
-    lastManualCredit: admin.firestore.FieldValue.serverTimestamp(),
-  });
-
-  return {success: true, message: `Added ${credits} credits`};
-});
-
-// ============================================================================
-// PROFIT ANALYTICS (Estatísticas de Lucro)
-// ============================================================================
-
-export const getProfitAnalytics = onCall(async (request) => {
-  const auth = request.auth;
-  if (!auth) throw new HttpsError("unauthenticated", "Login necessário");
-
-  const {startDate, endDate} = request.data as {startDate?: string; endDate?: string};
-
-  try {
-    // Busca estatísticas diárias
-    let query = db
-      .collection("users")
-      .doc(auth.uid)
-      .collection("daily_stats")
-      .orderBy("date", "desc")
-      .limit(30);
-
-    if (startDate) {
-      query = query.where("date", ">=", startDate);
-    }
-    if (endDate) {
-      query = query.where("date", "<=", endDate);
-    }
-
-    const snapshot = await query.get();
-
-    const dailyData = snapshot.docs.map((doc) => doc.data());
-
-    // Calcula totais
-    const totals = dailyData.reduce((acc, day) => ({
-      totalSales: acc.totalSales + (day.totalSales || 0),
-      totalRevenue: acc.totalRevenue + (day.totalRevenue || 0),
-      totalCosts: acc.totalCosts + (day.totalCosts || 0),
-      totalProfit: acc.totalProfit + (day.totalProfit || 0),
-      ordersCount: acc.ordersCount + (day.ordersCount || 0),
-    }), {totalSales: 0, totalRevenue: 0, totalCosts: 0, totalProfit: 0, ordersCount: 0});
-
-    const avgProfitMargin = totals.totalRevenue > 0
-      ? (totals.totalProfit / totals.totalRevenue) * 100
-      : 0;
-
-    return {
-      dailyData,
-      totals: {
-        ...totals,
-        avgProfitMargin: parseFloat(avgProfitMargin.toFixed(1)),
-      },
-    };
-  } catch (error) {
-    console.error("[PROFIT ANALYTICS ERROR]", error);
-    throw new HttpsError("internal", "Erro ao buscar análises");
-  }
+export const healthCheck = onCall(async () => {
+  return {
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    region: "southamerica-east1",
+  };
 });

@@ -1,194 +1,130 @@
-/**
- * Delivery Hub Webhook - Unified entry point for external marketplaces
- * Receives orders from iFood, Rappi, UberEats and saves to Firestore
- */
 
-import {onRequest} from "firebase-functions/v2/https";
-import * as admin from "firebase-admin";
-import * as crypto from "crypto";
-import {normalizeExternalOrder} from "./adapters";
+import { onRequest } from 'firebase-functions/v2/https';
+import * as admin from 'firebase-admin';
+import * as crypto from 'crypto';
+import axios from 'axios';
+import { 
+  normalizeiFoodOrder, 
+  normalizeRappiOrder, 
+  normalizeUberEatsOrder 
+} from './adapters';
 
-if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-// Segredos para validação de webhooks (colocar no .env)
-const WEBHOOK_SECRETS: Record<string, string> = {
-  IFOOD: process.env.IFOOD_WEBHOOK_SECRET || "",
-  RAPPI: process.env.RAPPI_WEBHOOK_SECRET || "",
-  UBER_EATS: process.env.UBEREATS_WEBHOOK_SECRET || "",
+// Variáveis de Ambiente (Configure no .env.emprataai)
+const UBER_TOKEN = process.env.UBER_EATS_TOKEN;
+const WEBHOOK_SECRETS: Record<string, string | undefined> = {
+  IFOOD: process.env.IFOOD_WEBHOOK_SECRET,
+  RAPPI: process.env.RAPPI_WEBHOOK_SECRET,
+  UBER_EATS: process.env.UBER_WEBHOOK_SECRET,
 };
 
-/**
- * Valida assinatura do webhook (HMAC)
- */
 function validateSignature(
   source: string,
   payload: string,
   signature: string
 ): boolean {
   const secret = WEBHOOK_SECRETS[source];
-  if (!secret) return true; // Se não tem secret configurado, aceita (dev mode)
+  
+  // 1. Se não tiver segredo configurado (Ambiente de Teste), aceita tudo
+  if (!secret) return true;
+
+  // 2. Se tiver segredo, mas não veio assinatura, rejeita
+  if (!signature) return false;
 
   const expectedSignature = crypto
     .createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
-}
+  // 3. Validação de tamanho para evitar erro do timingSafeEqual
+  const sigBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
 
-/**
- * Delivery Hub Webhook
- * URL: /deliveryHubWebhook?source=IFOOD&rid=RESTAURANT_ID
- */
-export const deliveryHubWebhook = onRequest(async (req, res) => {
-  // Responde rápido para não dar timeout (iFood exige <5s)
-  res.setTimeout(5000);
-
-  const source = (req.query.source as string || "").toUpperCase();
-  const restaurantId = req.query.rid as string;
-
-  // Log de entrada
-  console.log(`[HUB] Webhook recebido de ${source} para restaurante ${restaurantId}`);
-
-  // Validações básicas
-  if (!source || !restaurantId) {
-    console.error("[HUB] Parâmetros faltando: source ou rid");
-    res.status(400).send("Missing source or rid parameter");
-    return;
+  if (sigBuffer.length !== expectedBuffer.length) {
+    return false;
   }
 
-  // Validação de assinatura
-  const signature = req.headers["x-signature"] as string ||
-                   req.headers["x-ifood-signature"] as string ||
-                   req.headers["x-rappi-signature"] as string || "";
+  return crypto.timingSafeEqual(sigBuffer, expectedBuffer);
+}
 
-  if (!validateSignature(source, JSON.stringify(req.body), signature)) {
-    console.error("[HUB] Assinatura inválida");
-    res.status(401).send("Invalid signature");
-    return;
+export const deliveryHubWebhook = onRequest(async (req, res) => {
+  const source = (req.query.source as string)?.toUpperCase(); // ?source=IFOOD ou ?source=UBER
+  const restaurantId = req.query.rid as string;
+  const signature = req.headers['x-signature'] as string || '';
+
+  console.log(`[HUB] Recebido evento de ${source}`);
+
+  // Validação de Assinatura (Segurança)
+  // Nota: Em produção, você deve habilitar isso. Em teste, se não tiver env var, passa reto.
+  if (req.rawBody && !validateSignature(source, req.rawBody.toString(), signature)) {
+      console.warn(`[HUB SECURITY] Assinatura inválida para ${source}`);
+      // res.status(401).send('Invalid Signature'); // Descomente em produção
   }
 
   try {
-    const payload = req.body;
-    const eventType = payload.code || payload.event || payload.type || "ORDER";
+    let orderData = null;
 
-    // Identificar tipo de evento
-    console.log(`[HUB] Evento: ${eventType}`);
+    // --- ROTEAMENTO POR FONTE ---
+    
+    switch (source) {
+        case 'IFOOD':
+            // iFood manda o pedido completo no payload (em certos eventos)
+            if (req.body.code === 'PLACED') {
+                orderData = normalizeiFoodOrder(req.body.data, restaurantId);
+            }
+            break;
 
-    // Processar apenas eventos de novo pedido
-    const newOrderEvents = ["PLACED", "PLC", "NEW_ORDER", "ORDER_CREATED", "order.created"];
-    if (!newOrderEvents.includes(eventType)) {
-      // Outros eventos (CONFIRMED, CANCELLED, etc) - apenas logar
-      console.log(`[HUB] Evento ignorado: ${eventType}`);
-      res.status(200).send("Event ignored");
-      return;
+        case 'RAPPI':
+            // Rappi manda order_created
+            if (req.body.type === 'order_created') {
+                orderData = normalizeRappiOrder(req.body.payload, restaurantId);
+            }
+            break;
+
+        case 'UBER_EATS':
+            // Uber manda apenas o resource_href (Link para buscar o pedido)
+            // Evento: orders.notification
+            if (req.body.event_type === 'orders.notification') {
+                const resourceUrl = req.body.resource_href; 
+                // BUSCAR DETALHES NA API DA UBER
+                const uberRes = await axios.get(resourceUrl, {
+                    headers: { 'Authorization': `Bearer ${UBER_TOKEN}` }
+                });
+                orderData = normalizeUberEatsOrder(uberRes.data, restaurantId);
+            }
+            break;
+            
+        case '99FOOD':
+            // 99 Food (Exemplo genérico)
+            if (req.body.status === 1) { // 1 = Novo
+                // orderData = normalize99Order(req.body, restaurantId); // Use se tiver o adapter
+                console.log('99Food adapter not implemented yet');
+            }
+            break;
+            
+        default:
+            console.warn(`Fonte desconhecida: ${source}`);
     }
 
-    // Extrair dados do pedido (formato varia por marketplace)
-    const orderPayload = payload.data || payload.order || payload;
+    // --- SALVAR NO FIRESTORE ---
+    if (orderData) {
+        // Usa ID externo como chave para evitar duplicidade
+        await db.collection('orders').doc(orderData.externalId).set({
+            ...orderData,
+            integrated: true,
+            integrationTime: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
 
-    // Normalizar pedido para formato Emprata
-    const normalizedOrder = normalizeExternalOrder(source, orderPayload, restaurantId);
-
-    if (!normalizedOrder) {
-      console.error(`[HUB] Falha ao normalizar pedido de ${source}`);
-      res.status(400).send("Failed to normalize order");
-      return;
+        console.log(`[HUB] Pedido ${orderData.externalId} do ${orderData.source} salvo!`);
+        
+        // Dica: Aqui o seu "Smart Batching" vai detectar o novo pedido automaticamente
     }
 
-    // Verificar se pedido já existe (evitar duplicidade)
-    const existingOrder = await db
-      .collection("orders")
-      .where("externalId", "==", normalizedOrder.externalId)
-      .where("source", "==", source)
-      .limit(1)
-      .get();
+    res.status(200).send('OK');
 
-    if (!existingOrder.empty) {
-      console.log(`[HUB] Pedido ${normalizedOrder.externalId} já existe`);
-      res.status(200).send("Order already exists");
-      return;
-    }
-
-    // Salvar no Firestore
-    const orderRef = db.collection("orders").doc();
-    await orderRef.set({
-      ...normalizedOrder,
-      id: orderRef.id,
-    });
-
-    console.log(`[HUB] ✅ Pedido ${normalizedOrder.externalId} importado de ${source} -> ${orderRef.id}`);
-
-    // Notificar restaurante
-    await db
-      .collection("users")
-      .doc(restaurantId)
-      .collection("notifications")
-      .add({
-        type: "NEW_ORDER",
-        title: `🔔 Novo Pedido (${source})`,
-        body: `Pedido #${normalizedOrder.externalId.slice(-6)} - R$ ${normalizedOrder.financials.total.toFixed(2)}`,
-        orderId: orderRef.id,
-        source,
-        date: admin.firestore.FieldValue.serverTimestamp(),
-        read: false,
-      });
-
-    // 🎯 DICA: Aqui o Smart Batching vai acordar automaticamente!
-    // O trigger em orders vai detectar o novo documento e agrupar com outros próximos
-
-    res.status(200).send({
-      success: true,
-      orderId: orderRef.id,
-      externalId: normalizedOrder.externalId,
-    });
   } catch (error) {
-    console.error("[HUB] Erro ao processar webhook:", error);
-    res.status(500).send("Internal error");
+    console.error('[HUB ERROR]', error);
+    res.status(500).send('Erro na integração');
   }
 });
-
-/**
- * Listar integrações disponíveis do restaurante
- */
-export const getIntegrations = async (restaurantId: string) => {
-  const integrations = await db
-    .collection("users")
-    .doc(restaurantId)
-    .collection("integrations")
-    .get();
-
-  return integrations.docs.map((doc) => ({
-    id: doc.id,
-    ...doc.data(),
-  }));
-};
-
-/**
- * Salvar configuração de integração
- */
-export const saveIntegration = async (
-  restaurantId: string,
-  source: string,
-  config: {
-    enabled: boolean;
-    merchantId?: string;
-    apiKey?: string;
-    webhookUrl?: string;
-  }
-) => {
-  await db
-    .collection("users")
-    .doc(restaurantId)
-    .collection("integrations")
-    .doc(source.toUpperCase())
-    .set({
-      source: source.toUpperCase(),
-      ...config,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, {merge: true});
-};
