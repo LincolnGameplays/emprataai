@@ -15,12 +15,15 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 // CONFIGURATION
 // ══════════════════════════════════════════════════════════════════
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY || '');
 
-// Use the logic model for text generation
+// Detecta se está em desenvolvimento (Mock Mode)
+const IS_DEV = import.meta.env.DEV;
+
+// Use gemini-1.5-flash for better free tier limits (15 RPM, 1500/day)
 const logicModel = genAI.getGenerativeModel({ 
-  model: 'gemini-2.0-flash-exp',
+  model: 'gemini-1.5-flash', // ✅ Otimizado para alta frequência
   generationConfig: {
     temperature: 0.8,
     maxOutputTokens: 500,

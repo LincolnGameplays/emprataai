@@ -26,6 +26,8 @@ import PricingTable from './pages/admin/PricingTable';
 import BusinessIntelligence from './pages/admin/BusinessIntelligence';
 import SubscriptionPage from './pages/admin/SubscriptionPage';
 import StorefrontEditor from './components/admin/StorefrontEditor';
+import QrCodeStudio from './pages/admin/QrCodeStudio';
+import OwnerJourney from './pages/apps/owner/OwnerJourney';
 
 // Pages - Marketplace (Cliente)
 import MarketplaceHome from './pages/marketplace/Home';
@@ -101,6 +103,7 @@ export default function App() {
           {/* ROTAS STARTER (Livres para todos os planos)                      */}
           {/* ════════════════════════════════════════════════════════════════ */}
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/journey" element={<OwnerJourney />} />
           <Route path="/menu-builder" element={<MenuBuilder />} />
           <Route path="/kitchen-display" element={<KitchenDisplay />} />
           <Route path="/staff" element={<StaffManagement />} />
@@ -109,6 +112,7 @@ export default function App() {
           <Route path="/studio" element={<AppStudio />} />
           <Route path="/subscription" element={<SubscriptionPage />} />
           <Route path="/pricing" element={<PricingTable />} />
+          <Route path="/qr-studio" element={<QrCodeStudio />} />
           {/* 💰 CARTEIRA (Aberta para TODOS - Correção do Loop de Frustração) */}
           <Route path="/finance" element={<FinanceModule />} />
 

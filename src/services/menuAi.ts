@@ -9,8 +9,8 @@ import type { AIOrganizeResponse, AISmartOrganizeResponse } from "../types/menu"
 // Initialize API with environment key
 const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_API_KEY || "");
 
-// Use Gemini 1.5 Pro for better language nuance and JSON output
-const AI_MODEL = "gemini-1.5-pro";
+// Use Gemini 1.5 Flash for better free tier (15 RPM vs 2 RPM)
+const AI_MODEL = "gemini-1.5-flash";
 
 // ══════════════════════════════════════════════════════════════════
 // ENHANCE DESCRIPTION
@@ -275,7 +275,7 @@ export async function parseMenuFromText(text: string) {
   `;
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    const model = genAI.getGenerativeModel({ model: AI_MODEL });
     const result = await model.generateContent(prompt);
     const response = result.response.text();
     // Limpeza básica para garantir JSON válido

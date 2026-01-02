@@ -21,6 +21,7 @@ import { CommandPalette } from '../components/dashboard/CommandPalette';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { formatCurrency } from '../utils/format';
 import { PLANS } from '../types/subscription';
+import JourneyWidget from '../components/dashboard/JourneyWidget';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -134,6 +135,9 @@ export default function Dashboard() {
             </button>
          </div>
       </div>
+
+      {/* JOURNEY WIDGET - Barra de Progresso Verificado */}
+      <JourneyWidget />
 
       {/* 2. GRID DE APLICATIVOS (Organizado por Seção) */}
       <div className="space-y-8">

@@ -17,14 +17,14 @@ import { useAppStore } from "../store/useAppStore";
 import { auth, db } from "../config/firebase";
 import { doc, updateDoc, increment } from "firebase/firestore";
 
-// Initialize API with environment key
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_API_KEY || "");
+// Initialize API with environment key  
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_AI_API_KEY || import.meta.env.VITE_GOOGLE_API_KEY || "");
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MODEL CONFIGURATION (LOCKED - DO NOT CHANGE THESE NAMES)
+// MODEL CONFIGURATION (Updated for free tier limits)
 // ══════════════════════════════════════════════════════════════════════════════
-const PROMPT_ARCHITECT_MODEL = "models/gemini-3-pro-preview";   // O Cérebro
-const IMAGE_GENERATOR_MODEL = "models/gemini-2.5-flash-image";  // O Artista
+const PROMPT_ARCHITECT_MODEL = "gemini-1.5-flash";   // O Cérebro (15 RPM free tier)
+const IMAGE_GENERATOR_MODEL = "gemini-1.5-flash";    // Fallback - will use Pollinations for images
 
 export interface GenerateImageParams {
   file: File;

@@ -72,14 +72,46 @@ service cloud.firestore {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // USERS COLLECTION (Proteção de Dados Sensíveis)
+    // USERS COLLECTION (Proteção de Dados Sensíveis + Subscription Lock)
     // ══════════════════════════════════════════════════════════════════
+    
+    // 🔐 SECURITY: Detecta se o usuário está tentando alterar subscription
+    // Isso é CRÍTICO para evitar que usuários se deem plano BLACK via console
+    function isTouchingSubscription() {
+      // Se resource é null (create), verifica se está tentando definir subscription
+      return resource == null 
+        ? request.resource.data.keys().hasAny(['subscription', 'plan'])
+        : request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscription', 'plan']);
+    }
+    
+    // 🔐 SECURITY: Detecta se está tentando alterar campos financeiros sensíveis
+    function isTouchingFinance() {
+      return resource == null
+        ? request.resource.data.keys().hasAny(['finance', 'asaasWalletId', 'asaasApiKey', 'asaasAccountId'])
+        : request.resource.data.diff(resource.data).affectedKeys().hasAny(['finance', 'asaasWalletId', 'asaasApiKey', 'asaasAccountId']);
+    }
+
     match /users/{userId} {
       // Qualquer um pode ler dados PÚBLICOS (Nome, Foto, Loja)
       allow read: if true;
       
-      // Só o dono pode editar seu perfil
-      allow write: if isSignedIn() && isOwner(userId);
+      // 🔐 Criar perfil: Permitido, mas SEM definir subscription ou dados financeiros
+      // (Subscription e Finance são definidos apenas pelo Backend/Admin SDK)
+      allow create: if isSignedIn() 
+                    && isOwner(userId)
+                    && !isTouchingSubscription()
+                    && !isTouchingFinance();
+      
+      // 🔐 Atualizar perfil: BLOQUEADO se tentar mexer em subscription ou finance
+      // Usuário pode mudar nome, telefone, endereço, etc.
+      // Mas NUNCA pode mudar: subscription, plan, finance, asaasWalletId, etc.
+      allow update: if isSignedIn() 
+                    && isOwner(userId) 
+                    && !isTouchingSubscription()
+                    && !isTouchingFinance();
+      
+      // Usuários não podem deletar contas (apenas via Admin ou Cloud Function)
+      allow delete: if false;
       
       // SUB-COLEÇÃO PRIVADA (CPF, Saldo, Dados Bancários)
       // NINGUÉM de fora consegue ler isso, nem via Proxy

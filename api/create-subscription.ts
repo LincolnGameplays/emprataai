@@ -88,7 +88,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         value: value,
         cycle: cycle || 'MONTHLY',
         description: description || 'Assinatura Emprata',
-        nextDueDate: nextDueDate
+        nextDueDate: nextDueDate,
+        externalReference: userId  // 🔐 Critical: Links payment to Firebase user for webhook
       })
     });
 

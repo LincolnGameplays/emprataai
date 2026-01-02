@@ -4,13 +4,14 @@ import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion'
 import { 
   ArrowRight, ChefHat, MapPin, Zap, ShieldCheck, 
   Smartphone, TrendingUp, DollarSign, BrainCircuit,
-  Clock, Target, Sparkles
+  Clock, Target, Sparkles, Menu, X, Instagram, Linkedin, MessageCircle
 } from 'lucide-react';
 import { usePlatformStats } from '../hooks/usePlatformStats';
 import { SeoEngine } from '../components/seo/SeoEngine';
 
 export default function LandingPage() {
   const [viewMode, setViewMode] = useState<'CONSUMER' | 'BUSINESS'>('CONSUMER');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
   const stats = usePlatformStats();
   const containerRef = useRef(null);
@@ -229,6 +230,119 @@ export default function LandingPage() {
             </motion.button>
          </div>
       </section>
+
+      {/* --- FAQ SECTION (Quebra de Objeções) --- */}
+      <section className="py-24 px-6 border-t border-white/5 bg-[#050505]">
+         <div className="max-w-3xl mx-auto">
+            <h2 className="text-3xl font-black text-center mb-12 text-white">Perguntas Frequentes</h2>
+            <div className="space-y-4">
+               <FaqItem 
+                  question="Preciso pagar mensalidade no plano Starter?" 
+                  answer="Não. O plano Starter é isento de custos fixos. Cobramos apenas uma pequena taxa sobre os pedidos realizados." 
+               />
+               <FaqItem 
+                  question="Como recebo o dinheiro das vendas?" 
+                  answer="O dinheiro cai na sua Carteira Digital dentro do sistema. Você pode solicitar o saque via Pix para sua conta bancária a qualquer momento." 
+               />
+               <FaqItem 
+                  question="O App do Motorista funciona em iPhone e Android?" 
+                  answer="Sim. Nosso app de logística é compatível com qualquer smartphone e usa GPS de alta precisão." 
+               />
+               <FaqItem 
+                  question="Posso cancelar o plano Black quando quiser?" 
+                  answer="Sim. Sem fidelidade, sem letras miúdas. Você cancela com um clique no seu painel." 
+               />
+               <FaqItem 
+                  question="É seguro colocar meus dados bancários?" 
+                  answer="Totalmente. Utilizamos criptografia de ponta a ponta e nosso parceiro de pagamentos (Asaas) é regulamentado pelo Banco Central." 
+               />
+            </div>
+         </div>
+      </section>
+
+      {/* --- FOOTER PROFISSIONAL --- */}
+      <footer className="bg-black py-20 px-6 border-t border-white/10">
+         <div className="max-w-7xl mx-auto grid md:grid-cols-4 gap-12">
+            <div className="col-span-1 md:col-span-2">
+               <h2 className="text-3xl font-black italic tracking-tighter mb-4">EMPRATA<span className="text-purple-500">.AI</span></h2>
+               <p className="text-white/40 max-w-sm">O sistema operacional definitivo para o futuro da gastronomia. Inteligência, logística e vendas em um só lugar.</p>
+               <div className="flex gap-4 mt-6">
+                  <a href="#" className="w-10 h-10 bg-white/5 rounded-full hover:bg-white/20 transition-colors flex items-center justify-center">
+                     <Instagram size={18} className="text-white/60" />
+                  </a>
+                  <a href="#" className="w-10 h-10 bg-white/5 rounded-full hover:bg-white/20 transition-colors flex items-center justify-center">
+                     <Linkedin size={18} className="text-white/60" />
+                  </a>
+                  <a href="#" className="w-10 h-10 bg-white/5 rounded-full hover:bg-[#25D366]/20 transition-colors flex items-center justify-center">
+                     <MessageCircle size={18} className="text-white/60" />
+                  </a>
+               </div>
+            </div>
+            
+            <div>
+               <h4 className="font-bold text-white mb-6 uppercase text-xs tracking-widest">Produto</h4>
+               <ul className="space-y-4 text-sm text-white/50">
+                  <li><button onClick={() => { setViewMode('CONSUMER'); window.scrollTo(0,0); }} className="hover:text-white transition-colors">Para Consumidores</button></li>
+                  <li><button onClick={() => { setViewMode('BUSINESS'); window.scrollTo(0,0); }} className="hover:text-white transition-colors">Para Restaurantes</button></li>
+                  <li><button onClick={() => navigate('/subscription')} className="hover:text-white transition-colors">Preços e Planos</button></li>
+                  <li><button onClick={() => navigate('/apps')} className="hover:text-white transition-colors">Baixar Apps</button></li>
+               </ul>
+            </div>
+
+            <div>
+               <h4 className="font-bold text-white mb-6 uppercase text-xs tracking-widest">Legal</h4>
+               <ul className="space-y-4 text-sm text-white/50">
+                  <li><button onClick={() => navigate('/terms')} className="hover:text-white transition-colors">Termos de Uso</button></li>
+                  <li><button onClick={() => navigate('/privacy')} className="hover:text-white transition-colors">Privacidade</button></li>
+                  <li><a href="https://wa.me/5511999999999" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Suporte (WhatsApp)</a></li>
+               </ul>
+            </div>
+         </div>
+         <div className="max-w-7xl mx-auto mt-20 pt-8 border-t border-white/5 text-center text-xs text-white/20">
+            &copy; {new Date().getFullYear()} Emprata.ai Inc. Todos os direitos reservados.
+         </div>
+      </footer>
+
+      {/* --- MOBILE MENU BUTTON --- */}
+      <div className="md:hidden fixed top-6 right-4 z-[60]">
+         <button 
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+            className="bg-black/80 p-3 rounded-full border border-white/10 text-white backdrop-blur-md"
+         >
+            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+         </button>
+      </div>
+
+      {/* --- MOBILE MENU OVERLAY --- */}
+      <AnimatePresence>
+         {isMobileMenuOpen && (
+            <motion.div 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className="fixed inset-0 bg-black z-[55] flex flex-col items-center justify-center gap-8"
+            >
+               <button 
+                  onClick={() => { setViewMode('CONSUMER'); setIsMobileMenuOpen(false); }} 
+                  className="text-3xl font-black text-green-400 hover:scale-110 transition-transform"
+               >
+                  PARA COMER
+               </button>
+               <button 
+                  onClick={() => { setViewMode('BUSINESS'); setIsMobileMenuOpen(false); }} 
+                  className="text-3xl font-black text-purple-400 hover:scale-110 transition-transform"
+               >
+                  PARA VENDER
+               </button>
+               <button 
+                  onClick={() => { navigate('/auth'); setIsMobileMenuOpen(false); }} 
+                  className="bg-white text-black px-8 py-4 rounded-xl font-bold mt-8 hover:scale-105 transition-transform"
+               >
+                  ENTRAR
+               </button>
+            </motion.div>
+         )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -394,3 +508,34 @@ function MegaCard({ icon: Icon, title, subtitle, detailContent, color, bgGlow, c
 const CloudRain = ({ size, className }: any) => (
    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M8 19v2"/><path d="M8 13v2"/><path d="M16 19v2"/><path d="M16 13v2"/><path d="M12 21v2"/><path d="M12 15v2"/></svg>
 );
+
+// --- FAQ ACCORDION ITEM ---
+function FaqItem({ question, answer }: { question: string; answer: string }) {
+   const [isOpen, setIsOpen] = useState(false);
+   return (
+      <div className="border border-white/5 rounded-2xl bg-[#121212] overflow-hidden">
+         <button 
+            onClick={() => setIsOpen(!isOpen)}
+            className="w-full flex justify-between items-center p-6 text-left hover:bg-white/5 transition-colors"
+         >
+            <span className="font-bold text-lg pr-4">{question}</span>
+            <span className={`transform transition-transform shrink-0 text-white/40 ${isOpen ? 'rotate-180' : ''}`}>▼</span>
+         </button>
+         <AnimatePresence>
+            {isOpen && (
+               <motion.div 
+                  initial={{ height: 0, opacity: 0 }} 
+                  animate={{ height: 'auto', opacity: 1 }} 
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+               >
+                  <div className="p-6 pt-0 text-white/60 leading-relaxed">
+                     {answer}
+                  </div>
+               </motion.div>
+            )}
+         </AnimatePresence>
+      </div>
+   );
+}

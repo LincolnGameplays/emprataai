@@ -3,7 +3,7 @@ import { collection, query, where, orderBy, onSnapshot, doc, updateDoc } from 'f
 import { db } from '../../config/firebase';
 import { useAuth } from '../../hooks/useAuth';
 import { formatCurrency } from '../../utils/format';
-import { CheckCircle, XCircle, Clock, Truck } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Truck, Zap, AlertTriangle } from 'lucide-react';
 
 export default function OrdersManager() {
   const { user } = useAuth();
@@ -38,6 +38,17 @@ export default function OrdersManager() {
               <p className="text-xs text-primary font-bold">#{order.id.slice(-5)} - {order.customer.name}</p>
               <p className="font-black text-lg">{formatCurrency(order.total)}</p>
               <p className="text-[10px] text-white/40">Método: {order.paymentMethod} | Status: {order.paymentStatus}</p>
+              
+              {/* Indicador de XP Verificado */}
+              {(order.paymentMethod === 'PIX' || order.paymentMethod === 'CARD' || order.paymentMethod === 'CREDIT_CARD' || order.paymentMethod === 'ONLINE') ? (
+                <p className="text-[10px] text-green-400 flex items-center gap-1 mt-1">
+                  <Zap size={10} className="fill-green-400" /> +XP Verificado
+                </p>
+              ) : (
+                <p className="text-[10px] text-orange-400 flex items-center gap-1 mt-1">
+                  <AlertTriangle size={10} /> Sem XP (Pagamento Manual)
+                </p>
+              )}
             </div>
             <div className="flex gap-2">
               {order.status === 'pending' && (

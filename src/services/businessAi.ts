@@ -13,10 +13,10 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Initialize API with environment key
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_API_KEY || "");
+const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GOOGLE_AI_API_KEY || import.meta.env.VITE_GOOGLE_API_KEY || "");
 
-// Use Gemini 3 Pro for intelligent reasoning
-const LOGIC_MODEL = "models/gemini-3-pro-preview";
+// Use Gemini 1.5 Flash for better free tier (15 RPM, 1500/day)
+const LOGIC_MODEL = "gemini-1.5-flash";
 
 // ══════════════════════════════════════════════════════════════════
 // TYPE DEFINITIONS
