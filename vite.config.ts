@@ -27,8 +27,11 @@ export default defineConfig({
     },
   },
   
-  // Otimização de Dev Server
+  base: './',
   server: {
+    port: 5173,
+    strictPort: true,
+    host: true,
     hmr: {
       overlay: true,
     },

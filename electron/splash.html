@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Emprata AI</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: transparent;
+            overflow: hidden;
+            font-family: sans-serif;
+            -webkit-app-region: drag;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .logo {
+            width: 200px; /* Tamanho da logo */
+            height: auto;
+            filter: drop-shadow(0 0 25px rgba(34, 197, 94, 0.6)); /* Glow Verde */
+            animation: pulse 3s infinite ease-in-out;
+        }
+
+        .loader {
+            margin-top: 20px;
+            width: 60px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .loader::after {
+            content: '';
+            display: block;
+            width: 40%;
+            height: 100%;
+            background: #22c55e;
+            border-radius: 4px;
+            animation: slide 1.5s infinite ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 20px rgba(34, 197, 94, 0.5)); }
+            50% { transform: scale(1.05); filter: drop-shadow(0 0 40px rgba(34, 197, 94, 0.8)); }
+        }
+
+        @keyframes slide {
+            0% { transform: translateX(-150%); }
+            100% { transform: translateX(250%); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <img src="../public/logo.png" class="logo" alt="EmprataAI">
+        <div class="loader"></div>
+    </div>
+</body>
+</html>

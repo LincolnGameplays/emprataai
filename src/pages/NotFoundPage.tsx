@@ -78,18 +78,30 @@ export default function NotFoundPage() {
           A página que você está procurando não existe ou foi movida.
         </motion.p>
 
-        {/* CTA Button */}
-        <motion.button
+        {/* CTA Buttons */}
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.6 }}
-          whileHover={{ scale: 1.05 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={handleGoHome}
-          className="px-8 py-4 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-wider text-sm transition-all"
+          className="flex gap-4 flex-wrap justify-center"
         >
-          Voltar para o Início
-        </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => navigate(-1)}
+            className="px-6 py-4 rounded-2xl border border-white/20 hover:bg-white/5 font-bold text-white uppercase tracking-wider text-sm transition-all flex items-center gap-2"
+          >
+            ← Voltar
+          </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleGoHome}
+            className="px-8 py-4 rounded-2xl bg-primary hover:bg-orange-600 font-black text-white shadow-xl shadow-primary/40 uppercase tracking-wider text-sm transition-all"
+          >
+            Ir para Início
+          </motion.button>
+        </motion.div>
       </motion.div>
     </div>
   );

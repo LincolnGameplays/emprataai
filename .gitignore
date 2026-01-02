@@ -67,3 +67,14 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+
+# Builds do Electron
+dist_electron/
+dist/
+release/
+out/
+build/
+*.exe
+*.dmg
+*.zip
+*.asar

@@ -43,12 +43,28 @@ interface AppState {
   refundCredit: () => void;     // Use in CATCH block
 }
 
+// --- FUNÇÃO AUXILIAR DE UUID SEGURA ---
+// Corrige o erro "crypto.randomUUID is not a function"
+function generateUUID(): string {
+  // Tenta usar a API nativa se existir
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  
+  // Fallback robusto (UUID v4 via Math.random) para ambientes restritos
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 // Generate or retrieve persistent user ID
 const getUserId = (): string => {
   const stored = localStorage.getItem('emprata_user_id');
   if (stored) return stored;
   
-  const newId = crypto.randomUUID();
+  const newId = generateUUID(); // Usando a função segura
   localStorage.setItem('emprata_user_id', newId);
   return newId;
 };
@@ -77,7 +93,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setVibe: (selectedVibe) => set({ selectedVibe }),
   setPerspective: (selectedPerspective) => set({ selectedPerspective }),
   setLightIntensity: (lightIntensity) => set({ lightIntensity }),
-  setIsGenerating: (isGenerating) => set({ isGenerating }),
+  setIsGenerating: (isGenerating: boolean) => set({ isGenerating }),
   
   resetEditor: () => set({
     originalImage: null,

@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { 
   LayoutDashboard, Bike, ChefHat, Store, Camera, 
   DollarSign, Users, Settings, Menu as MenuIcon, 
-  ChevronRight, BarChart3, Bell, Search, ShieldCheck, Lock
+  ChevronRight, BarChart3, Bell, Search, ShieldCheck, Lock, Trophy, MessageCircle
 } from 'lucide-react';
 import { UserDropdown } from '../components/UserDropdown';
 import { useAuth } from '../hooks/useAuth';
@@ -51,7 +51,10 @@ const SECTIONS: NavSection[] = [
   {
     title: 'Crescimento & IA',
     items: [
-      { path: '/intelligence', label: 'Business Intelligence', icon: <BarChart3 size={20} />, highlight: true, feature: 'ai_insights' },
+      { path: '/journey', label: 'Minha Jornada', icon: <Trophy size={20} />, highlight: true },
+      { path: '/crm', label: 'Central CRM', icon: <Users size={20} />, badge: 'Novo' },
+      { path: '/whatsapp', label: 'Marketing WhatsApp', icon: <MessageCircle size={20} /> },
+      { path: '/intelligence', label: 'Business Intelligence', icon: <BarChart3 size={20} />, feature: 'ai_insights' },
       { path: '/studio', label: 'Estúdio Mágico IA', icon: <Camera size={20} /> },
     ]
   }

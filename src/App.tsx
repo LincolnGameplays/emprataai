@@ -28,6 +28,9 @@ import SubscriptionPage from './pages/admin/SubscriptionPage';
 import StorefrontEditor from './components/admin/StorefrontEditor';
 import QrCodeStudio from './pages/admin/QrCodeStudio';
 import OwnerJourney from './pages/apps/owner/OwnerJourney';
+import WhatsappTool from './pages/apps/owner/WhatsappTool';
+import CRMHub from './pages/apps/owner/CRMHub';
+import CampaignBuilder from './pages/apps/owner/CampaignBuilder';
 
 // Pages - Marketplace (Cliente)
 import MarketplaceHome from './pages/marketplace/Home';
@@ -45,7 +48,9 @@ import PosTerminal from './pages/apps/PosTerminal';
 
 // Components
 import { ProtectedRoute } from './components/ProtectedRoute';
+import PrivateRoute from './components/auth/PrivateRoute';
 import PlanProtected from './components/auth/PlanProtected';
+import NetworkStatus from './components/ui/NetworkStatus';
 import { useAuth } from './hooks/useAuth';
 
 // ----------------------------------------------------------------------
@@ -67,6 +72,9 @@ function RootRedirect() {
 export default function App() {
   return (
     <Router>
+      {/* Global Network Status Indicator */}
+      <NetworkStatus />
+      
       <Toaster 
         position="top-center"
         richColors
@@ -97,8 +105,8 @@ export default function App() {
         <Route path="/owner" element={<ProtectedRoute><OwnerApp /></ProtectedRoute>} />
         <Route path="/pos" element={<ProtectedRoute><PosTerminal /></ProtectedRoute>} />
 
-        {/* 🏢 MUNDO DO DONO (Protegido + AppLayout) */}
-        <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+        {/* 🏢 MUNDO DO DONO (Protegido por Role + AppLayout) */}
+        <Route element={<PrivateRoute allowedRole="OWNER"><AppLayout /></PrivateRoute>}>
           {/* ════════════════════════════════════════════════════════════════ */}
           {/* ROTAS STARTER (Livres para todos os planos)                      */}
           {/* ════════════════════════════════════════════════════════════════ */}
@@ -115,6 +123,11 @@ export default function App() {
           <Route path="/qr-studio" element={<QrCodeStudio />} />
           {/* 💰 CARTEIRA (Aberta para TODOS - Correção do Loop de Frustração) */}
           <Route path="/finance" element={<FinanceModule />} />
+          
+          {/* 📱 CRM & MARKETING (Módulo de Vendas Ativas) */}
+          <Route path="/crm" element={<CRMHub />} />
+          <Route path="/whatsapp" element={<WhatsappTool />} />
+          <Route path="/campaigns" element={<CampaignBuilder />} />
 
           {/* ════════════════════════════════════════════════════════════════ */}
           {/* 🚀 ROTAS GROWTH (Protegidas - Requerem plano Growth+)            */}
@@ -142,8 +155,8 @@ export default function App() {
 
         </Route>
 
-        {/* 🍔 MUNDO DO CLIENTE (Layout de App de Delivery) */}
-        <Route element={<CustomerLayout />}>
+        {/* 🍔 MUNDO DO CLIENTE (Layout de App de Delivery + Proteção) */}
+        <Route element={<PrivateRoute allowedRole="CUSTOMER"><CustomerLayout /></PrivateRoute>}>
           <Route path="/delivery" element={<MarketplaceHome />} />
           <Route path="/search" element={<MarketplaceHome />} />
           <Route path="/me" element={<ConsumerProfile />} />

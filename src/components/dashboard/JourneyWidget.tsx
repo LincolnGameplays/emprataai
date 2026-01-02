@@ -75,7 +75,7 @@ export default function JourneyWidget() {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className="bg-gradient-to-r from-[#0a0a0a] to-[#121212] rounded-[2rem] p-6 border border-white/10 relative overflow-hidden group cursor-pointer hover:border-white/20 transition-all"
-      onClick={() => navigate('/owner/journey')}
+      onClick={() => navigate('/journey')}
     >
       {/* Background Glow Effect */}
       <div 
