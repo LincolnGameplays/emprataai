@@ -11,6 +11,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { formatCurrency } from '../../utils/format';
 import { validateCPFNative, maskCPF, maskPhone, validatePhone } from '../../utils/validators';
 import { toast } from 'sonner';
+import { CryptoService } from '../../services/cryptoService';
 
 export default function ConsumerProfile() {
   const { user, signOut } = useAuth();
@@ -39,12 +40,23 @@ export default function ConsumerProfile() {
       try {
         // 1. Perfil Público
         const userDoc = await getDoc(doc(db, 'users', user.uid));
-        setProfile(userDoc.data() || { displayName: user.displayName, phone: '' });
+        const userData = userDoc.data() || { displayName: user.displayName, phone: '' };
+        
+        // Decrypt phone if encrypted
+        if (userData.phone && CryptoService.isEncrypted(userData.phone)) {
+          userData.phone = CryptoService.decrypt(userData.phone);
+        }
+        setProfile(userData);
 
         // 2. Dados Privados (Sub-coleção protegida pelas regras)
         const privateDoc = await getDoc(doc(db, `users/${user.uid}/private_data`, 'sensitive'));
         if (privateDoc.exists()) {
-          setPrivateData(privateDoc.data());
+          const privData = privateDoc.data();
+          // Decrypt CPF if encrypted
+          if (privData.cpf && CryptoService.isEncrypted(privData.cpf)) {
+            privData.cpf = CryptoService.decrypt(privData.cpf);
+          }
+          setPrivateData(privData);
         }
       } catch (error) {
         console.error('[ConsumerProfile] Erro ao carregar perfil:', error);
@@ -65,7 +77,7 @@ export default function ConsumerProfile() {
       const past: any[] = [];
 
       snap.docs.forEach(doc => {
-        const data = { id: doc.id, ...doc.data() };
+        const data: any = { id: doc.id, ...doc.data() };
         // Status que consideram o pedido "Aberto"
         if (['PENDING', 'PREPARING', 'READY', 'DISPATCHED'].includes(data.status?.toUpperCase())) {
           active.push(data);
@@ -82,7 +94,7 @@ export default function ConsumerProfile() {
     return () => unsub();
   }, [user, navigate]);
 
-  // Salva dados (Público + Privado segregados)
+  // Salva dados (Público + Privado segregados) COM CRIPTOGRAFIA AES-256
   const handleSave = async () => {
     if (!auth.currentUser) return;
 
@@ -97,20 +109,24 @@ export default function ConsumerProfile() {
     setSaving(true);
 
     try {
-      // 1. Salva dados PÚBLICOS
+      // 1. CRIPTOGRAFIA: Encrypt sensitive data before saving
+      const encryptedPhone = profile.phone ? CryptoService.encrypt(profile.phone) : '';
+      const encryptedCPF = privateData.cpf ? CryptoService.encrypt(privateData.cpf) : '';
+
+      // 2. Salva dados PÚBLICOS (phone encrypted)
       await setDoc(doc(db, 'users', auth.currentUser.uid), {
         displayName: profile.displayName,
-        phone: profile.phone,
+        phone: encryptedPhone, // ENCRYPTED
         updatedAt: new Date()
       }, { merge: true });
 
-      // 2. Salva dados PRIVADOS (Segregados na sub-coleção protegida)
+      // 3. Salva dados PRIVADOS (CPF encrypted) - Segregados na sub-coleção protegida
       await setDoc(doc(db, `users/${auth.currentUser.uid}/private_data`, 'sensitive'), {
-        cpf: privateData.cpf,
+        cpf: encryptedCPF, // ENCRYPTED (AES-256)
         updatedAt: new Date()
       }, { merge: true });
 
-      toast.success("Dados atualizados e protegidos com sucesso!");
+      toast.success("🔐 Dados criptografados e salvos com segurança militar!");
       setEditMode(false);
     } catch (error) {
       console.error('[ConsumerProfile] Erro ao salvar:', error);

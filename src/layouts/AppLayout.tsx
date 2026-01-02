@@ -1,24 +1,41 @@
 import { useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { 
   LayoutDashboard, Bike, ChefHat, Store, Camera, 
   DollarSign, Users, Settings, Menu as MenuIcon, 
-  X, ChevronRight, BarChart3, Bell, Search, ShieldCheck
+  ChevronRight, BarChart3, Bell, Search, ShieldCheck, Lock
 } from 'lucide-react';
 import { UserDropdown } from '../components/UserDropdown';
 import { useAuth } from '../hooks/useAuth';
+import { useSubscription } from '../hooks/useSubscription';
+import { FeatureKey, PLANS, getRequiredPlan } from '../types/subscription';
+import { toast } from 'sonner';
 
 // ══════════════════════════════════════════════════════════════════
-// NAVIGATION CONFIG (Organizada por Setores)
+// NAVIGATION CONFIG (Organizada por Setores com Feature Gates)
 // ══════════════════════════════════════════════════════════════════
 
-const SECTIONS = [
+interface NavItem {
+  path: string;
+  label: string;
+  icon: JSX.Element;
+  badge?: string;
+  highlight?: boolean;
+  feature?: FeatureKey; // If set, requires this feature to access
+}
+
+interface NavSection {
+  title: string;
+  items: NavItem[];
+}
+
+const SECTIONS: NavSection[] = [
   {
     title: 'Operação em Tempo Real',
     items: [
       { path: '/dashboard', label: 'Visão Geral', icon: <LayoutDashboard size={20} /> },
-      { path: '/dispatch', label: 'Logística & Entregas', icon: <Bike size={20} />, badge: 'Ao Vivo' },
+      { path: '/dispatch', label: 'Logística & Entregas', icon: <Bike size={20} />, badge: 'Ao Vivo', feature: 'driver_app_access' },
       { path: '/kitchen-display', label: 'KDS Cozinha', icon: <ChefHat size={20} /> },
     ]
   },
@@ -27,16 +44,15 @@ const SECTIONS = [
     items: [
       { path: '/menu-builder', label: 'Cardápio Digital', icon: <MenuIcon size={20} /> },
       { path: '/store-settings', label: 'Vitrine do App', icon: <Store size={20} />, highlight: true },
-      { path: '/finance', label: 'Financeiro', icon: <DollarSign size={20} /> },
+      { path: '/finance', label: 'Financeiro', icon: <DollarSign size={20} />, feature: 'financial_overview' },
       { path: '/staff', label: 'Equipe & Acessos', icon: <Users size={20} /> },
     ]
   },
   {
     title: 'Crescimento & IA',
     items: [
-      { path: '/intelligence', label: 'Business Intelligence', icon: <BarChart3 size={20} />, highlight: true },
+      { path: '/intelligence', label: 'Business Intelligence', icon: <BarChart3 size={20} />, highlight: true, feature: 'ai_insights' },
       { path: '/studio', label: 'Estúdio Mágico IA', icon: <Camera size={20} /> },
-      // Futuro: { path: '/marketing', label: 'Campanhas', icon: <Megaphone size={20} /> },
     ]
   }
 ];
@@ -44,7 +60,34 @@ const SECTIONS = [
 export default function AppLayout() {
   const [isSidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
+  const { checkAccess } = useSubscription();
+
+  // Handle navigation with permission check
+  const handleNavClick = (item: NavItem) => {
+    // If no feature restriction, navigate freely
+    if (!item.feature) {
+      navigate(item.path);
+      return;
+    }
+
+    // Check if user has access
+    if (checkAccess(item.feature)) {
+      navigate(item.path);
+    } else {
+      // Show upgrade toast and redirect to subscription
+      const requiredPlan = getRequiredPlan(item.feature);
+      toast.error(`Recurso do plano ${PLANS[requiredPlan].label}`, {
+        description: 'Faça upgrade para acessar este módulo',
+        action: {
+          label: 'Ver Planos',
+          onClick: () => navigate('/subscription')
+        }
+      });
+      navigate('/subscription');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex">
@@ -79,14 +122,25 @@ export default function AppLayout() {
               <div className="space-y-1">
                 {section.items.map((item) => {
                   const isActive = location.pathname === item.path;
+                  const hasAccess = item.feature ? checkAccess(item.feature) : true;
+
                   return (
-                    <Link key={item.path} to={item.path}>
-                      <div className={`
-                        flex items-center gap-3 px-4 py-3 rounded-xl transition-all relative group
-                        ${isActive ? 'bg-primary text-black font-bold shadow-[0_0_20px_rgba(255,107,0,0.3)]' : 'text-white/60 hover:bg-white/5 hover:text-white'}
-                      `}>
+                    <button
+                      key={item.path}
+                      onClick={() => handleNavClick(item)}
+                      className={`
+                        w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl transition-all relative group text-left
+                        ${isActive 
+                          ? 'bg-primary text-black font-bold shadow-[0_0_20px_rgba(255,107,0,0.3)]' 
+                          : hasAccess
+                            ? 'text-white/60 hover:bg-white/5 hover:text-white'
+                            : 'text-white/30 hover:bg-white/5 cursor-not-allowed'
+                        }
+                      `}
+                    >
+                      <div className="flex items-center gap-3">
                         {/* Icon */}
-                        <div className={`${isActive ? 'text-black' : item.highlight ? 'text-primary' : ''}`}>
+                        <div className={`${isActive ? 'text-black' : item.highlight && hasAccess ? 'text-primary' : ''}`}>
                           {item.icon}
                         </div>
 
@@ -94,22 +148,33 @@ export default function AppLayout() {
                         {isSidebarOpen && (
                           <span className="text-sm whitespace-nowrap">{item.label}</span>
                         )}
-
-                        {/* Badge (Notification/Live) */}
-                        {item.badge && isSidebarOpen && (
-                          <span className="absolute right-3 bg-red-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase animate-pulse">
-                            {item.badge}
-                          </span>
-                        )}
-
-                        {/* Tooltip for collapsed mode */}
-                        {!isSidebarOpen && (
-                          <div className="absolute left-full ml-4 bg-white text-black px-3 py-1 rounded-lg text-xs font-bold opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
-                            {item.label}
-                          </div>
-                        )}
                       </div>
-                    </Link>
+
+                      {/* Right side: Badge or Lock */}
+                      {isSidebarOpen && (
+                        <>
+                          {/* Lock icon for restricted items */}
+                          {!hasAccess && (
+                            <Lock size={14} className="text-white/30" />
+                          )}
+                          
+                          {/* Badge (Notification/Live) - only if has access */}
+                          {item.badge && hasAccess && (
+                            <span className="bg-red-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded uppercase animate-pulse">
+                              {item.badge}
+                            </span>
+                          )}
+                        </>
+                      )}
+
+                      {/* Tooltip for collapsed mode */}
+                      {!isSidebarOpen && (
+                        <div className="absolute left-full ml-4 bg-white text-black px-3 py-1 rounded-lg text-xs font-bold opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 flex items-center gap-2">
+                          {item.label}
+                          {!hasAccess && <Lock size={10} />}
+                        </div>
+                      )}
+                    </button>
                   );
                 })}
               </div>

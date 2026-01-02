@@ -20,16 +20,55 @@ service cloud.firestore {
              get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.restaurantId == restaurantId;
     }
     
-    // Valida se o pedido tem estrutura mínima válida
+    // Valida se o pedido tem estrutura mínima válida (Anti-Fraude)
     function isValidOrder() {
       let data = request.resource.data;
       return data.total != null 
-             && data.total > 0
+             && data.total > 0                         // Valor deve ser positivo
              && data.customer != null
              && data.customer.name != null
              && data.customer.name.size() > 2
              && data.items != null
-             && data.items.size() > 0;
+             && data.items.size() > 0                  // Deve ter itens
+             && data.restaurantId is string            // Deve ter dono
+             && data.restaurantId.size() > 0
+             && data.status in ['PENDING', 'pending']  // Nasce como Pendente
+             && (!data.keys().hasAny(['isPaid']) || data.isPaid == false); // Não pode criar como pago
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 🔐 PLAN-BASED ACCESS CONTROL FUNCTIONS
+    // ══════════════════════════════════════════════════════════════════
+    
+    // Get user document data
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Get user's subscription plan (defaults to STARTER)
+    function getPlan() {
+      let userData = getUserData();
+      // Check both subscription.plan (new) and plan (legacy)
+      return userData.get('subscription', {}).get('plan', userData.get('plan', 'STARTER'));
+    }
+    
+    // Check if subscription is active
+    function isPlanActive() {
+      let plan = getPlan();
+      let status = getUserData().get('subscription', {}).get('status', 'inactive');
+      // STARTER is always active, paid plans need 'active' status
+      return plan == 'STARTER' || plan == 'FREE' || status == 'active';
+    }
+    
+    // Plan hierarchy checks
+    function isGrowthOrHigher() {
+      let plan = getPlan();
+      return isPlanActive() && (plan == 'GROWTH' || plan == 'BLACK' || plan == 'PRO');
+    }
+    
+    function isBlackPlan() {
+      let plan = getPlan();
+      return isPlanActive() && (plan == 'BLACK' || plan == 'PRO');
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -50,23 +89,31 @@ service cloud.firestore {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // ORDERS COLLECTION (Anti-Espionagem)
+    // ORDERS COLLECTION (Anti-Espionagem + PDV Support)
     // ══════════════════════════════════════════════════════════════════
     match /orders/{orderId} {
-      // Só lê quem é o dono do pedido, o dono do restaurante ou o motorista
+      // Ler: Dono do restaurante, Cliente dono do pedido ou Motorista
       allow read: if isSignedIn() && (
         resource.data.customer.uid == request.auth.uid || 
         resource.data.restaurantId == request.auth.uid ||
         resource.data.driverId == request.auth.uid
       );
       
-      // Criar pedido: Qualquer logado + validação estrutural
-      allow create: if isValidOrder();
+      // Criar pedido: Usuário logado (Cliente via web OU PDV)
+      // PDV pode criar pedidos já pagos (source: 'POS')
+      allow create: if isSignedIn() && (
+        // Pedido normal (web) - validação anti-fraude
+        isValidOrder() ||
+        // Pedido PDV - já vem do caixa pago
+        (request.resource.data.source == 'POS' && 
+         request.resource.data.restaurantId == request.auth.uid)
+      );
       
-      // Atualizar: Apenas os envolvidos (ex: motorista muda status)
+      // Atualizar: Envolvidos no pedido (Dono, Motorista, Cliente)
       allow update: if isSignedIn() && (
         resource.data.restaurantId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid
+        resource.data.driverId == request.auth.uid ||
+        resource.data.customer.uid == request.auth.uid
       );
       
       // Ninguém pode deletar pedidos (integridade do histórico)
@@ -89,18 +136,20 @@ service cloud.firestore {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // DRIVERS COLLECTION (GPS Tracking)
+    // 🚀 DRIVERS COLLECTION (GPS Tracking) - GROWTH+ ONLY
     // ══════════════════════════════════════════════════════════════════
     match /drivers/{driverId} {
-      // Qualquer logado pode ler (para tracking em tempo real)
+      // Ler: Qualquer logado (para tracking em tempo real)
       allow read: if isSignedIn();
       
-      // Motorista só atualiza sua própria localização
+      // Motorista atualiza sua própria localização (always allowed)
       allow update: if isSignedIn() && isOwner(driverId);
       
-      // Criar/editar apenas pelo dono do restaurante
+      // 🔐 CRIAR/GERENCIAR MOTORISTA: REQUER GROWTH+
+      // Um Starter tentando criar motorista será bloqueado aqui
       allow create: if isSignedIn() 
-                    && request.resource.data.restaurantId == request.auth.uid;
+                    && request.resource.data.restaurantId == request.auth.uid
+                    && isGrowthOrHigher();
       
       // Ninguém deleta driver (apenas desativa via update)
       allow delete: if false;
@@ -130,12 +179,90 @@ service cloud.firestore {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // PRODUCTS COLLECTION (Para PDV e Estoque)
+    // ══════════════════════════════════════════════════════════════════
+    match /products/{productId} {
+      // Qualquer um pode ler produtos (cardápio público + PDV)
+      allow read: if true;
+      
+      // Criar: Apenas dono do restaurante
+      allow create: if isSignedIn() 
+                    && request.resource.data.restaurantId == request.auth.uid;
+      
+      // Editar/Deletar: Apenas dono do produto
+      allow update, delete: if isSignedIn() 
+                            && resource.data.restaurantId == request.auth.uid;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // NOTIFICATIONS COLLECTION
     // ══════════════════════════════════════════════════════════════════
     match /notifications/{notifId} {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if true; // Sistema cria notificações
       allow update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // MENUS COLLECTION (Cardápios públicos com escrita restrita)
+    // ══════════════════════════════════════════════════════════════════
+    match /menus/{menuId} {
+      // Qualquer um pode ler cardápios (para QR Code funcionar)
+      allow read: if true;
+      
+      // Apenas o dono pode editar seu cardápio
+      allow write: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 💎 BRAIN SYNAPSES (IA) - BLACK ONLY
+    // ══════════════════════════════════════════════════════════════════
+    match /brain_synapses/{restaurantId} {
+      // 🔐 Apenas BLACK pode ler suas sinapses de IA
+      allow read: if isSignedIn() && restaurantId == request.auth.uid && isBlackPlan();
+      
+      // Escrita apenas via Cloud Functions (sistema)
+      allow write: if false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 💎 AI INSIGHTS COLLECTION - BLACK ONLY
+    // ══════════════════════════════════════════════════════════════════
+    match /ai_insights/{restaurantId} {
+      // 🔐 Apenas BLACK pode ler insights de IA
+      allow read: if isSignedIn() && restaurantId == request.auth.uid && isBlackPlan();
+      
+      // Escrita apenas via Cloud Functions
+      allow write: if false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 💎 ANALYTICS REPORTS - BLACK ONLY
+    // ══════════════════════════════════════════════════════════════════
+    match /analytics_reports/{reportId} {
+      // 🔐 Apenas BLACK pode ler relatórios avançados
+      allow read: if isSignedIn() && resource.data.restaurantId == request.auth.uid && isBlackPlan();
+      
+      // Escrita apenas via Cloud Functions
+      allow write: if false;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 💎 CRM CAMPAIGNS (Automação) - BLACK ONLY
+    // ══════════════════════════════════════════════════════════════════
+    match /crm_campaigns/{campaignId} {
+      // 🔐 Apenas BLACK pode ler/criar campanhas CRM
+      allow read: if isSignedIn() && resource.data.restaurantId == request.auth.uid && isBlackPlan();
+      allow write: if isSignedIn() && request.resource.data.restaurantId == request.auth.uid && isBlackPlan();
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // 🚀 DISPATCH LOGS (Logística) - GROWTH+ ONLY
+    // ══════════════════════════════════════════════════════════════════
+    match /dispatch_logs/{logId} {
+      // 🔐 Logs de despacho requerem GROWTH+
+      allow read: if isSignedIn() && resource.data.restaurantId == request.auth.uid && isGrowthOrHigher();
+      allow write: if isSignedIn() && request.resource.data.restaurantId == request.auth.uid && isGrowthOrHigher();
     }
 
     // ══════════════════════════════════════════════════════════════════

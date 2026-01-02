@@ -84,3 +84,21 @@ export const formatPhone = (phone: string): string => {
   }
   return cleanPhone.replace(/(\d{2})(\d{4})(\d{4})/, '($1) $2-$3');
 };
+
+// ══════════════════════════════════════════════════════════════════
+// ALIASES PARA SECURE CHECKOUT (Compatibilidade)
+// ══════════════════════════════════════════════════════════════════
+export const isValidCPF = (cpfInput: string): boolean => {
+  const cleanDoc = cpfInput.replace(/\D/g, '');
+  return cleanDoc.length === 11 && cpf.isValid(cleanDoc);
+};
+
+export const isValidCNPJ = (cnpjInput: string): boolean => {
+  const cleanDoc = cnpjInput.replace(/\D/g, '');
+  return cleanDoc.length === 14 && cnpj.isValid(cleanDoc);
+};
+
+export const cleanDigits = (value: string): string => {
+  return value.replace(/\D/g, '');
+};
+

@@ -45,7 +45,7 @@ export default function DriverPayout({ driver, onClose }: DriverPayoutProps) {
           .map((doc) => ({ id: doc.id, ...doc.data() } as Order))
           .filter((order) => {
             // Filter for today only
-            const orderDate = order.deliveredAt?.toDate?.() || new Date(0);
+            const orderDate = (order.deliveredAt as any)?.toDate?.() || new Date(0);
             return orderDate >= todayStart;
           });
 

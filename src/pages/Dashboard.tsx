@@ -5,6 +5,7 @@
  * - Command Palette (Cmd+K) for quick navigation
  * - Modular app grid organized by section
  * - Real-time stats and status
+ * - Feature gating based on subscription plan
  */
 
 import { useState, useEffect } from 'react';
@@ -12,17 +13,21 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Bike, ChefHat, Store, DollarSign, Users, BrainCircuit, 
-  Zap, Search, QrCode, Smartphone, Settings, BarChart3
+  Zap, Search, QrCode, Smartphone, Settings, Lock, CreditCard, Monitor
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { usePlan } from '../hooks/usePlan';
 import { CommandPalette } from '../components/dashboard/CommandPalette';
 import { useDashboardStats } from '../hooks/useDashboardStats';
 import { formatCurrency } from '../utils/format';
+import { PLANS } from '../types/subscription';
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { currentPlan, canAccess } = usePlan();
   const navigate = useNavigate();
-  const { totalSales, orderCount, averageTicket } = useDashboardStats();
+  const { totalSales, totalOrders } = useDashboardStats();
+  const averageTicket = totalOrders > 0 ? totalSales / totalOrders : 0;
   const [showCommand, setShowCommand] = useState(false);
 
   // Global keyboard shortcut for Command Palette
@@ -37,35 +42,36 @@ export default function Dashboard() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Módulos do Sistema
-  const MODULES = [
+  // Módulos do Sistema com Feature Gates
+  const MODULES: { title: string; apps: { title: string; desc: string; icon: any; path: string; color: string; bg: string; border?: string; feature: string }[] }[] = [
     {
       title: "Operação em Tempo Real",
       apps: [
-        { title: "Logística", desc: "Gestão de Motoboys", icon: Bike, path: "/dispatch", color: "text-green-400", bg: "bg-green-500/10" },
-        { title: "Cozinha (KDS)", desc: "Pedidos para Preparo", icon: ChefHat, path: "/kitchen-display", color: "text-orange-400", bg: "bg-orange-500/10" },
+        { title: "Logística", desc: "Gestão de Motoboys", icon: Bike, path: "/dispatch", color: "text-green-400", bg: "bg-green-500/10", feature: "dispatch_console" },
+        { title: "Cozinha (KDS)", desc: "Pedidos para Preparo", icon: ChefHat, path: "/kitchen-display", color: "text-orange-400", bg: "bg-orange-500/10", feature: "kds_kitchen" },
+        { title: "Terminal PDV", desc: "Caixa Unificado", icon: Monitor, path: "/pos", color: "text-cyan-400", bg: "bg-cyan-500/10", feature: "pos_terminal" },
       ]
     },
     {
       title: "Gestão & Estratégia",
       apps: [
-        { title: "Cardápio", desc: "Editar Produtos", icon: Store, path: "/menu-builder", color: "text-blue-400", bg: "bg-blue-500/10" },
-        { title: "Financeiro", desc: "Fluxo de Caixa", icon: DollarSign, path: "/finance", color: "text-yellow-400", bg: "bg-yellow-500/10" },
-        { title: "Equipe", desc: "Acessos e PINs", icon: Users, path: "/staff", color: "text-purple-400", bg: "bg-purple-500/10" },
-        { title: "Vitrine", desc: "Personalizar Loja", icon: Settings, path: "/store-settings", color: "text-cyan-400", bg: "bg-cyan-500/10" },
+        { title: "Cardápio", desc: "Editar Produtos", icon: Store, path: "/menu-builder", color: "text-blue-400", bg: "bg-blue-500/10", feature: "menu_builder" },
+        { title: "Financeiro", desc: "Fluxo de Caixa", icon: DollarSign, path: "/finance", color: "text-yellow-400", bg: "bg-yellow-500/10", feature: "financial_advanced" },
+        { title: "Equipe", desc: "Acessos e PINs", icon: Users, path: "/staff", color: "text-purple-400", bg: "bg-purple-500/10", feature: "staff_management" },
+        { title: "Vitrine", desc: "Personalizar Loja", icon: Settings, path: "/store-settings", color: "text-slate-400", bg: "bg-slate-500/10", feature: "basic_access" },
       ]
     },
     {
       title: "Inteligência Artificial",
       apps: [
-        { title: "EmprataBrain", desc: "Análise de Negócio", icon: BrainCircuit, path: "/intelligence", color: "text-pink-400", bg: "bg-pink-500/10", border: "border-pink-500/30" },
+        { title: "EmprataBrain", desc: "Análise de Negócio", icon: BrainCircuit, path: "/intelligence", color: "text-pink-400", bg: "bg-pink-500/10", border: "border-pink-500/30", feature: "emprata_brain" },
       ]
     },
     {
       title: "Apps & Ferramentas",
       apps: [
-        { title: "App do Dono", desc: "Controle Mobile", icon: Smartphone, path: "/owner", color: "text-violet-400", bg: "bg-violet-500/10" },
-        { title: "QR Codes", desc: "Mesas e Links", icon: QrCode, path: "/qr-print", color: "text-emerald-400", bg: "bg-emerald-500/10" },
+        { title: "App do Dono", desc: "Controle Mobile", icon: Smartphone, path: "/owner", color: "text-violet-400", bg: "bg-violet-500/10", feature: "basic_access" },
+        { title: "QR Codes", desc: "Mesas e Links", icon: QrCode, path: "/qr-print", color: "text-emerald-400", bg: "bg-emerald-500/10", feature: "qr_codes" },
       ]
     }
   ];
@@ -90,7 +96,7 @@ export default function Dashboard() {
                      <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                      <span className="text-xs font-bold uppercase">Sistema Online</span>
                   </div>
-                  <span className="text-sm">Olá, {user?.name?.split(' ')[0] || 'Chef'}</span>
+                  <span className="text-sm">Olá, {user?.displayName?.split(' ')[0] || 'Chef'}</span>
                </div>
             </div>
 
@@ -102,7 +108,7 @@ export default function Dashboard() {
                </div>
                <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 min-w-[100px]">
                   <p className="text-[10px] uppercase font-bold text-white/40 mb-1">Pedidos</p>
-                  <p className="text-2xl font-black text-white">{orderCount}</p>
+                  <p className="text-2xl font-black text-white">{totalOrders}</p>
                </div>
                <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 min-w-[130px]">
                   <p className="text-[10px] uppercase font-bold text-white/40 mb-1">Ticket Médio</p>
@@ -142,31 +148,54 @@ export default function Dashboard() {
                   {section.title}
                </h3>
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {section.apps.map((app) => (
-                     <motion.button
-                        key={app.path}
-                        onClick={() => navigate(app.path)}
-                        whileHover={{ scale: 1.02, y: -2 }}
-                        whileTap={{ scale: 0.98 }}
-                        className={`bg-[#121212] p-6 rounded-3xl border ${app.border || 'border-white/5'} hover:border-white/20 transition-all text-left group relative overflow-hidden`}
-                     >
-                        <div className="flex items-start justify-between mb-4 relative z-10">
-                           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${app.bg} ${app.color} text-xl shadow-lg group-hover:scale-110 transition-transform`}>
-                              <app.icon size={28} />
+                  {section.apps.map((app) => {
+                     const unlocked = canAccess(app.feature);
+                     
+                     return (
+                        <motion.button
+                           key={app.path}
+                           onClick={() => unlocked ? navigate(app.path) : navigate('/subscription')}
+                           whileHover={{ scale: 1.02, y: -2 }}
+                           whileTap={{ scale: 0.98 }}
+                           className={`p-6 rounded-3xl border transition-all text-left group relative overflow-hidden ${
+                              unlocked 
+                                 ? `bg-[#121212] ${app.border || 'border-white/5'} hover:border-white/20`
+                                 : 'bg-[#0a0a0a] border-white/5 opacity-80'
+                           }`}
+                        >
+                           <div className="flex items-start justify-between mb-4 relative z-10">
+                              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${app.bg} ${app.color} text-xl shadow-lg group-hover:scale-110 transition-transform`}>
+                                 <app.icon size={28} />
+                              </div>
+                              {!unlocked ? (
+                                 <div className="bg-white/10 p-2 rounded-full backdrop-blur-md">
+                                    <Lock size={14} className="text-white/60" />
+                                 </div>
+                              ) : (
+                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/10 p-2 rounded-full">
+                                    <Zap size={14} className="text-white" />
+                                 </div>
+                              )}
                            </div>
-                           <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/10 p-2 rounded-full">
-                              <Zap size={14} className="text-white" />
+                           <div className="relative z-10">
+                              <h4 className="text-xl font-bold text-white mb-1">{app.title}</h4>
+                              <p className="text-sm text-white/40 font-medium">{app.desc}</p>
                            </div>
-                        </div>
-                        <div className="relative z-10">
-                           <h4 className="text-xl font-bold text-white mb-1">{app.title}</h4>
-                           <p className="text-sm text-white/40 font-medium">{app.desc}</p>
-                        </div>
-                        
-                        {/* Hover Gradient Effect */}
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/0 to-white/[0.02] opacity-0 group-hover:opacity-100 transition-opacity" />
-                     </motion.button>
-                  ))}
+                           
+                           {/* Hover Gradient Effect */}
+                           <div className="absolute inset-0 bg-gradient-to-br from-white/0 to-white/[0.02] opacity-0 group-hover:opacity-100 transition-opacity" />
+                           
+                           {/* Unlock Overlay for locked modules */}
+                           {!unlocked && (
+                              <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                                 <span className="bg-white text-black px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transform translate-y-4 group-hover:translate-y-0 transition-transform">
+                                    <Zap size={12} className="fill-black" /> DESBLOQUEAR
+                                 </span>
+                              </div>
+                           )}
+                        </motion.button>
+                     );
+                  })}
                </div>
             </motion.div>
          ))}

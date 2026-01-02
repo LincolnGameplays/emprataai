@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShoppingBag, X, Plus, Minus, ChefHat, Search, CreditCard, ArrowRight, CheckCircle, Sparkles, CloudRain, Dumbbell, Zap, Moon, MapPin, Clock, ArrowLeft, Star } from 'lucide-react';
-import { Helmet } from 'react-helmet-async';
 import { collection, query, where, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
 import { Loading } from '../components/Loading';
@@ -18,6 +17,8 @@ import { useRestaurantMetrics } from '../hooks/useRestaurantMetrics';
 import { calculateDistance, formatDistance } from '../utils/geo';
 import { predictDeliveryTime, type DeliveryPrediction } from '../services/logisticsAi';
 import { Loader2 } from 'lucide-react';
+import { SeoEngine } from '../components/seo/SeoEngine';
+import { OrderSuccessViral } from '../components/checkout/OrderSuccessViral';
 
 // Interfaces simplificadas para o componente
 // Interfaces simplificadas para o componente
@@ -41,10 +42,10 @@ interface OrderSuccess {
 }
 
 export default function PublicMenu() {
-  const { slug } = useParams();
+  const { slug, tableNum } = useParams(); // tableNum para rotas /menu/:slug/table/:tableNum
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const tableId = searchParams.get('table');
+  const tableId = tableNum || searchParams.get('table'); // Suporta ambos os formatos
   const [loading, setLoading] = useState(true);
   const [restaurant, setRestaurant] = useState<any>(null);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
@@ -394,9 +395,17 @@ export default function PublicMenu() {
 
   return (
     <div className={`min-h-screen bg-[#050505] text-white pb-32 transition-colors duration-700`}>
-      <Helmet>
-        <title>{restaurant?.name || 'Cardápio'} | Emprata.ai</title>
-      </Helmet>
+      {/* SEO ENGINE - Rich Snippets for Google */}
+      <SeoEngine
+        title={restaurant?.name || 'Cardápio'}
+        description={restaurant?.description || `Peça delivery de ${restaurant?.name || 'restaurante'} pelo EmprataAI`}
+        image={restaurant?.coverUrl}
+        path={`/menu/${slug}`}
+        type="restaurant"
+        rating={metrics?.rating}
+        reviewCount={metrics?.reviewCount}
+        priceRange={restaurant?.priceRange || '$$'}
+      />
 
       {/* Dynamic Background Gradient based on Vibe */}
       <div className={`fixed inset-0 bg-gradient-to-b ${vibeColors[currentVibe]} opacity-30 pointer-events-none transition-all duration-1000`} />
@@ -705,20 +714,15 @@ export default function PublicMenu() {
         </div>
       )}
 
-      {/* SUCCESS SCREEN */}
+      {/* SUCCESS SCREEN - VIRAL GROWTH */}
       {orderSuccess && (
-        <div className="fixed inset-0 z-[70] bg-black flex flex-col items-center justify-center p-6 text-center">
-            <CheckCircle className="w-24 h-24 text-green-500 mb-6" />
-            <h1 className="text-4xl font-black italic mb-2">Pedido Recebido!</h1>
-            <p className="text-white/60 mb-8 max-w-xs">{tableId ? 'Acompanhe pelo painel da mesa.' : 'Um entregador aceitará seu pedido em breve.'}</p>
-            
-            <div className="bg-white/5 p-8 rounded-3xl border border-white/10 mb-8">
-              <p className="text-xs font-bold uppercase tracking-widest text-white/40 mb-2">PIN DE ENTREGA</p>
-              <p className="text-5xl font-black text-primary tracking-[0.2em]">{orderSuccess.deliveryPin}</p>
-            </div>
-
-            <button onClick={() => setOrderSuccess(null)} className="text-white/50 hover:text-white font-bold text-sm uppercase">Fazer novo pedido</button>
-        </div>
+        <OrderSuccessViral
+          orderId={orderSuccess.orderId}
+          deliveryPin={orderSuccess.deliveryPin}
+          total={orderSuccess.total}
+          restaurantName={restaurant?.name}
+          onDismiss={() => setOrderSuccess(null)}
+        />
       )}
     </div>
   );

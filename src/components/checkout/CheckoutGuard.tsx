@@ -25,7 +25,7 @@ interface CheckoutGuardProps {
 }
 
 export default function CheckoutGuard({ cart, restaurantId, total, onClose, onSuccess }: CheckoutGuardProps) {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, loginWithGoogle } = useAuth();
   const [step, setStep] = useState<'login' | 'identity' | 'payment'>('login');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -119,7 +119,7 @@ export default function CheckoutGuard({ cart, restaurantId, total, onClose, onSu
   // Handle Google login
   const handleLogin = async () => {
     try {
-      await signInWithGoogle();
+      await loginWithGoogle();
       // useEffect will handle the rest
     } catch (err) {
       toast.error('Erro ao fazer login');
