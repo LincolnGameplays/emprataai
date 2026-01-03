@@ -105,35 +105,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     isGenerating: false,
   }),
 
-  // Legacy credit usage (for backward compatibility)
+  // Ação Atômica e Segura
+  decrementCredit: () => {
+    set((state) => {
+      // Usuários PRO têm créditos infinitos (ou não gastam)
+      if (state.plan === 'PRO') return state;
+
+      // Proteção contra saldo negativo
+      if (state.credits <= 0) {
+        // Retorna o estado atual sem mudar nada
+        return state; 
+      }
+
+      // Decrementa
+      return { credits: state.credits - 1 };
+    });
+  },
+
+  // Rollback em caso de erro da API
+  refundCredit: () => {
+    set((state) => {
+      if (state.plan === 'PRO') return state;
+      return { credits: state.credits + 1 };
+    });
+  },
+  
+  // Verificador boleano simples para UI
   useCredit: () => {
     const { credits, plan } = get();
     if (plan === 'PRO') return true;
-    if (credits > 0) {
-      set({ credits: credits - 1 });
-      return true;
-    }
-    return false;
-  },
-
-  // ════════════════════════════════════════════════════════════════════════════
-  // ATOMIC CREDIT TRANSACTION ACTIONS
-  // ════════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Optimistic Deduction - Call BEFORE API request
-   * Immediately deducts credit to prevent double-spending
-   */
-  decrementCredit: () => {
-    const { credits, plan } = get();
-    if (plan !== 'PRO' && credits > 0) {
-      set({ credits: credits - 1 });
-    }
-  },
-
-  /**
-   * Rollback Refund - Call in CATCH block on API failure
-   * Restores the credit when generation fails
-   */
-  refundCredit: () => set((state) => ({ credits: state.credits + 1 })),
+    return credits > 0;
+  }
 }));

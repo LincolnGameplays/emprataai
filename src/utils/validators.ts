@@ -102,3 +102,25 @@ export const cleanDigits = (value: string): string => {
   return value.replace(/\D/g, '');
 };
 
+// ══════════════════════════════════════════════════════════════════
+// CENTRAL VALIDATOR OBJECT (New Requirement)
+// ══════════════════════════════════════════════════════════════════
+export const validators = {
+  email: validateEmail,
+  
+  phone: validatePhone,
+
+  // Sanitização para evitar injeção de script simples
+  sanitize: (text: string) => {
+    const map: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#x27;',
+      "/": '&#x2F;',
+    };
+    const reg = /[&<>"'/]/ig;
+    return text.replace(reg, (match) => (map[match]));
+  }
+};

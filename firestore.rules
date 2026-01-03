@@ -250,11 +250,13 @@ service cloud.firestore {
     // 💎 BRAIN SYNAPSES (IA) - BLACK ONLY
     // ══════════════════════════════════════════════════════════════════
     match /brain_synapses/{restaurantId} {
-      // 🔐 Apenas BLACK pode ler suas sinapses de IA
+      // Leitura: Dono (Se for Black)
       allow read: if isSignedIn() && restaurantId == request.auth.uid && isBlackPlan();
       
-      // Escrita apenas via Cloud Functions (sistema)
-      allow write: if false;
+      // Escrita: Sistema (Cloud Functions) OU Dono (Para treino em tempo real)
+      allow write: if isSignedIn() 
+                   && restaurantId == request.auth.uid 
+                   && isBlackPlan();
     }
 
     // ══════════════════════════════════════════════════════════════════
